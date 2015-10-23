@@ -52,7 +52,7 @@ clean: clean-install clean-source
 #
 
 $(SRC_MKFILE):
-	cd "$(SOURCE)"; ./configure --prefix="$(RUN_PATH)"
+	cd "$(SOURCE)"; ./configure --prefix="$(RUN_PATH)" --add-module="$(ROOT_DIR)"
 
 $(SRC_BIN): $(SRC_MKFILE)
 #	@test -f $(SRC_MKFILE) || (echo "You have to run 'make configure' first"; exit 2)
