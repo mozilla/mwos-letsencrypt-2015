@@ -1,12 +1,8 @@
 # NginX sources
-nginx-src/
+nginx-*/
 
 # NginX install and runtime directory
 run/
 
 # Vim swap files
 *.swp
-
-# Files for the empty targets of the Makefile
-configure
-build
