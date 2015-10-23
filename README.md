@@ -1,4 +1,4 @@
-# Let's Encrypt Module for Nginx
+# Let's Encrypt module for Nginx
 
 ## Introduction
 
