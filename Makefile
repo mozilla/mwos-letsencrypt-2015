@@ -42,6 +42,7 @@ install: $(RUN_BIN)
 
 run:
 	@test -f "$(RUN_BIN)" || (echo "You have to run 'make install' first"; exit 2)
+	@test ! -f "$(PID_FILE)" || (echo "Error: NginX is already running"; exit 2)
 	"$(RUN_BIN)"
 
 kill:
