@@ -70,7 +70,7 @@ clean-all: clean clean-source
 
 $(SRC_MKFILE): $(MOD_CFG)
 	@test -d $(SRC_PATH) || (echo "You have to run 'make source' first to download the Nginx source code"; exit 2)
-	cd "$(SRC_PATH)"; ./configure --prefix="$(RUN_PATH)" --add-module="$(ROOT_DIR)"
+	cd "$(SRC_PATH)"; ./configure --prefix="$(RUN_PATH)" --with-http_ssl_module --add-module="$(ROOT_DIR)"
 
 $(SRC_BIN): $(SRC_MKFILE) $(MOD_SRC)
 	$(MAKE) -C "$(SRC_PATH)"
