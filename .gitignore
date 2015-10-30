@@ -6,3 +6,8 @@ run/
 
 # Vim swap files
 *.swp
+
+# Eclipse CDT
+.cproject
+.project
+.settings/

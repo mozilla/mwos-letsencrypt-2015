@@ -6,6 +6,9 @@ SRC_LINK := "http://nginx.org/download/$(SRC_VERSION).tar.gz"
 SRC_PATH := $(ROOT_DIR)/$(SRC_VERSION)
 RUN_PATH := $(ROOT_DIR)/run
 
+MOD_SRC := $(ROOT_DIR)/ngx_http_acme_module.c
+MOD_CFG := $(ROOT_DIR)/config
+
 MYCONFIG := $(ROOT_DIR)/conf/nginx.conf
 
 RUN_CONFIG := $(RUN_PATH)/conf/nginx.conf
@@ -65,13 +68,13 @@ clean-all: clean clean-source
 # File targets
 #
 
-$(SRC_MKFILE):
+$(SRC_MKFILE): $(MOD_CFG)
 	@test -d $(SRC_PATH) || (echo "You have to run 'make source' first to download the Nginx source code"; exit 2)
 	cd "$(SRC_PATH)"; ./configure --prefix="$(RUN_PATH)" --add-module="$(ROOT_DIR)"
 
-$(SRC_BIN): $(SRC_MKFILE)
+$(SRC_BIN): $(SRC_MKFILE) $(MOD_SRC)
 	$(MAKE) -C "$(SRC_PATH)"
 
-$(RUN_BIN): $(SRC_MKFILE)
+$(RUN_BIN): $(SRC_BIN)
 	$(MAKE) -C "$(SRC_PATH)" install
 	cp "$(MYCONFIG)" "$(RUN_CONFIG)"
