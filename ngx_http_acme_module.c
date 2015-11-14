@@ -12,6 +12,10 @@
 
 
 #define HELLO_WORLD "hello world"
+#define CERT_PATH "conf/cert.crt"
+#define KEY_PATH "conf/priv.key"
+#define FROM_CERT_PATH "../conf/cert.crt"
+#define FROM_KEY_PATH "../conf/priv.key"
 
 static ngx_int_t ngx_http_acme_handler(ngx_http_request_t *r);
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -81,8 +85,8 @@ static ngx_int_t ngx_http_acme_handler(ngx_http_request_t *r)
     ngx_chain_t out;
 
     /* Set the Content-Type header. */
-    r->headers_out.content_type.len = sizeof("text/plain") - 1;
-    r->headers_out.content_type.data = (u_char *) "text/plain";
+    r->headers_out.content_type.len = sizeof("text/html") - 1;
+    r->headers_out.content_type.data = (u_char *) "text/html";
 
     /* Allocate a new buffer for sending out the reply. */
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
@@ -121,10 +125,41 @@ static ngx_int_t ngx_http_acme_handler(ngx_http_request_t *r)
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_core_loc_conf_t *clcf; /* pointer to core location configuration */
+    ngx_copy_file_t   cpyf;
+    int ret;
 
     /* Install the acme handler. */
     clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
     clcf->handler = ngx_http_acme_handler;
 
+    /* Install a certificate */
+
+    // TODO (KK) Derive FROM_CERT_PATH and FROM_KEY_PATH from SSL module
+
+    cpyf.size = -1;
+    cpyf.buf_size = 0;
+    cpyf.access =  NGX_FILE_DEFAULT_ACCESS;
+    cpyf.time = -1;
+    cpyf.log = cf->log;
+
+    // Copy certificate
+    ret = ngx_copy_file((u_char *)FROM_CERT_PATH, (u_char *)CERT_PATH, &cpyf);
+
+    // Copy private key
+    if(ret == NGX_OK) {
+        // Only 0600 access for private key
+        cpyf.access = NGX_FILE_OWNER_ACCESS;
+
+        ret = ngx_copy_file((u_char *)FROM_KEY_PATH, (u_char *)KEY_PATH, &cpyf);
+    }
+
+    if(ret != NGX_OK) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "Copying the certificate or private key in place failed");
+        return NGX_CONF_ERROR;
+    }
+
+    /* End certificate installation */
+
     return NGX_CONF_OK;
 } /* ngx_http_hello_world */
+
