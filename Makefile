@@ -18,6 +18,11 @@ PID_FILE := $(RUN_PATH)/logs/nginx.pid
 SRC_MKFILE := $(SRC_PATH)/Makefile
 SRC_BIN := $(SRC_PATH)/objs/nginx
 
+CONFIGURE_OPTS := --prefix="$(RUN_PATH)" --with-http_ssl_module --add-module="$(ROOT_DIR)"
+
+# For debug output
+CONFIGURE_OPTS := $(CONFIGURE_OPTS) --with-debug
+
 .PHONY: default source configure build install run \
 	clean kill reinstall clean-install clean-all \
 	run reconfigure clean-build clean-source
@@ -58,6 +63,8 @@ clean-build:
 
 reconfigure: clean-build configure
 
+rebuild: clean-build build
+
 clean: clean-install clean-build
 
 clean-source:
@@ -71,7 +78,7 @@ clean-all: clean clean-source
 
 $(SRC_MKFILE): $(MOD_CFG)
 	@test -d $(SRC_PATH) || (echo "You have to run 'make source' first to download the Nginx source code"; exit 2)
-	cd "$(SRC_PATH)"; ./configure --prefix="$(RUN_PATH)" --with-http_ssl_module --add-module="$(ROOT_DIR)"
+	cd "$(SRC_PATH)"; ./configure $(CONFIGURE_OPTS)
 
 $(SRC_BIN): $(SRC_MKFILE) $(MOD_SRC)
 	$(MAKE) -C "$(SRC_PATH)"
