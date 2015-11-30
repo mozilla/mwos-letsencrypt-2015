@@ -84,13 +84,20 @@ ngx_module_t ngx_http_acme_module = {
  */
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-//    ngx_http_core_loc_conf_t *clcf; /* pointer to core location configuration */
+    ngx_http_ssl_srv_conf_t *sscf; /* pointer to core location configuration */
     ngx_copy_file_t   cpyf;
     int ret;
 
-    /* Install the acme handler. */
-//    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
-//    clcf->handler = ngx_http_acme_handler;
+    // Get SSL module configuration
+    sscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_ssl_module);
+
+    // TODO (KK) Report error when ssl configs are not set (acme w/o ssl configured in the same server context is an error)
+    if(sscf && sscf->certificate.data) {
+        ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Found SSL certificate path: %s", sscf->certificate.data);
+
+        // Spoof ssl cert
+//        ngx_str_set(&sscf->certificate, "i-dont-exist.pem");
+    }
 
     /* Begin certificate installation */
 
