@@ -106,6 +106,8 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_ssl_srv_conf_t *sscf; /* pointer to core location configuration */
     int ret;
 
+    // TODO: Pull the different parts out as own methods for readability
+
     /*
      * TODO: Get the config directory path (e.g. /etc/nginx)
      */
