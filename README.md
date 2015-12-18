@@ -36,4 +36,4 @@ of the server using make.
   * The build process and the directories can be configured in the first few lines of
     the [Makefile](Makefile).
 
-  * The server will run with a copy of the configuration file [conf/nginx.conf](conf/nginx.conf)
+  * The server will run with a copy of the configuration file [example/nginx.conf](example/nginx.conf)
