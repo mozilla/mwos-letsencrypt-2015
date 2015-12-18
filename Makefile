@@ -99,5 +99,3 @@ $(RUN_BIN): $(SRC_BIN)
 	# Install example files
 	cp "$(EXAMPLE_CONFIG)" "$(RUN_CONFIG)"
 	mkdir -p "$(ACME_CERT_DIR)"
-	cp "$(EXAMPLE_CERT)" "$(ACME_CERT)"
-	cp "$(EXAMPLE_CERT_KEY)" "$(ACME_CERT_KEY)"

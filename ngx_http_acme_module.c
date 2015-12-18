@@ -10,23 +10,30 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
-// Temporary dev makros
-#define ACME_DEV_CERT_PATH "conf/cert.pem"
-#define ACME_DEV_KEY_PATH "conf/cert.key"
-#define ACME_DEV_FROM_CERT_PATH "../conf/cert.pem"
-#define ACME_DEV_FROM_KEY_PATH "../conf/cert.key"
-// This should later be replaced with the value of the server_name directive of the core module
-#define ACME_DEV_SERVER_NAME "ledev2.kbauer.at"
-#define ACME_DEV_CONF_DIR "conf"
-
-// Makros which could also form config directives later
+/*
+ * Makros which could also form config directives later
+ */
 #define ACME_DIR "acme"
 #define ACME_LIVE_DIR "live"
 #define ACME_CERT_TRUSTED "chain.pem"
 #define ACME_CERT_KEY "privkey.pem"
 #define ACME_CERT "fullchain.pem"
 
-//static ngx_int_t ngx_http_acme_handler(ngx_http_request_t *r);
+/*
+ * Temporary dev makros
+ */
+// This should later be gathered from nginx
+#define ACME_DEV_CONF_DIR "conf"
+// This should later be replaced with the value of the server_name directive of the core module
+#define ACME_DEV_SERVER_NAME "ledev2.kbauer.at"
+
+#define ACME_DEV_CERT_PATH (ACME_DEV_CONF_DIR "/" ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT)
+#define ACME_DEV_KEY_PATH (ACME_DEV_CONF_DIR "/" ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT_KEY)
+#define ACME_DEV_EXAMPLE_DIR "../example"
+#define ACME_DEV_FROM_CERT_PATH (ACME_DEV_EXAMPLE_DIR "/cert.pem")
+#define ACME_DEV_FROM_KEY_PATH (ACME_DEV_EXAMPLE_DIR "/cert-key.pem")
+
+
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 static ngx_int_t ngx_http_acme_init(ngx_conf_t *cf);
@@ -95,8 +102,8 @@ ngx_module_t ngx_http_acme_module = {
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_ssl_srv_conf_t *sscf; /* pointer to core location configuration */
-//    ngx_copy_file_t   cpyf;
-//    int ret;
+    ngx_copy_file_t   cpyf;
+    int ret;
 
     /*
      * TODO: Get the config directory path (e.g. /etc/nginx)
@@ -109,31 +116,36 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 
     /*
-     * TODO: Install certificate
+     * TODO: Generate key pair for ACME authorization
      */
-//    ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Installing certificate and key");
-//
-//    cpyf.size = -1;
-//    cpyf.buf_size = 0;
-//    cpyf.access =  NGX_FILE_DEFAULT_ACCESS;
-//    cpyf.time = -1;
-//    cpyf.log = cf->log;
-//
-//    // Copy certificate
-//    ret = ngx_copy_file((u_char *)ACME_DEV_FROM_CERT_PATH, (u_char *)ACME_DEV_CERT_PATH, &cpyf);
-//
-//    // Copy private key
-//    if(ret == NGX_OK) {
-//        // Only 0600 access for private key
-//        cpyf.access = NGX_FILE_OWNER_ACCESS;
-//
-//        ret = ngx_copy_file((u_char *)ACME_DEV_FROM_KEY_PATH, (u_char *)ACME_DEV_KEY_PATH, &cpyf);
-//    }
-//
-//    if(ret != NGX_OK) {
-//        ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "Installing the certificate or private key in place failed");
-//        return NGX_CONF_ERROR;
-//    }
+
+
+    /*
+     * TODO: Install certificate (right now it just copies an example cert)
+     */
+    ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Installing certificate and key");
+
+    cpyf.size = -1;
+    cpyf.buf_size = 0;
+    cpyf.access =  NGX_FILE_DEFAULT_ACCESS;
+    cpyf.time = -1;
+    cpyf.log = cf->log;
+
+    // Copy certificate
+    ret = ngx_copy_file((u_char *)ACME_DEV_FROM_CERT_PATH, (u_char *)ACME_DEV_CERT_PATH, &cpyf);
+
+    // Copy private key
+    if(ret == NGX_OK) {
+        // Only 0600 access for private key
+        cpyf.access = NGX_FILE_OWNER_ACCESS;
+
+        ret = ngx_copy_file((u_char *)ACME_DEV_FROM_KEY_PATH, (u_char *)ACME_DEV_KEY_PATH, &cpyf);
+    }
+
+    if(ret != NGX_OK) {
+        ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "Installing the certificate or private key failed");
+        return NGX_CONF_ERROR;
+    }
 
     /*
      * Fool the SSL module into using the ACME certificates
@@ -156,7 +168,8 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 } /* ngx_http_acme */
 
 /**
- * TODO: docu
+ * TODO: delete
+ * This entry point is too late, we will probably never use it.
  */
 static ngx_int_t ngx_http_acme_init(ngx_conf_t *cf)
 {
