@@ -31,8 +31,7 @@ EXAMPLE_CERT_KEY := $(EXAMPLE_DIR)/cert-key.pem
 ACME_DIR := $(RUN_CONF_DIR)/acme
 ACME_SERVER_NAME := ledev2.kbauer.at
 ACME_CERT_DIR := $(ACME_DIR)/live/$(ACME_SERVER_NAME)
-ACME_CERT := $(ACME_CERT_DIR)/fullchain.pem
-ACME_CERT_KEY := $(ACME_CERT_DIR)/privkey.pem
+ACME_ACC_DIR := $(ACME_DIR)/accounts
 
 .PHONY: default source configure build install run \
 	clean kill reinstall clean-install clean-all \
@@ -99,3 +98,4 @@ $(RUN_BIN): $(SRC_BIN)
 	# Install example files
 	cp "$(EXAMPLE_CONFIG)" "$(RUN_CONFIG)"
 	mkdir -p "$(ACME_CERT_DIR)"
+	mkdir -p "$(ACME_ACC_DIR)"

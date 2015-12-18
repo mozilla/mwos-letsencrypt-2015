@@ -18,6 +18,8 @@
 #define ACME_CERT_TRUSTED "chain.pem"
 #define ACME_CERT_KEY "privkey.pem"
 #define ACME_CERT "fullchain.pem"
+#define ACME_ACCOUNT_RSA_BITS 2048
+#define ACME_ACCOUNT_RSA_EXP "65537"
 
 /*
  * Temporary dev makros
@@ -102,7 +104,6 @@ ngx_module_t ngx_http_acme_module = {
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_ssl_srv_conf_t *sscf; /* pointer to core location configuration */
-    ngx_copy_file_t   cpyf;
     int ret;
 
     /*
@@ -118,11 +119,25 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     /*
      * TODO: Generate key pair for ACME authorization
      */
+    RSA *rsa = NULL;
+    BIGNUM *e = NULL;
 
+    ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Generate RSA key");
+
+    // TODO: Check the return codes (ret)
+    rsa = RSA_new();
+    ret = BN_dec2bn(&e, ACME_ACCOUNT_RSA_EXP);
+    ret = RSA_generate_key_ex(rsa, ACME_ACCOUNT_RSA_BITS, e, NULL);
+
+
+    RSA_free(rsa);
+    BN_free(e);
 
     /*
      * TODO: Install certificate (right now it just copies an example cert)
      */
+    ngx_copy_file_t   cpyf;
+
     ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Installing certificate and key");
 
     cpyf.size = -1;
