@@ -10,11 +10,21 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+// Temporary dev makros
+#define ACME_DEV_CERT_PATH "conf/cert.pem"
+#define ACME_DEV_KEY_PATH "conf/cert.key"
+#define ACME_DEV_FROM_CERT_PATH "../conf/cert.pem"
+#define ACME_DEV_FROM_KEY_PATH "../conf/cert.key"
+// This should later be replaced with the value of the server_name directive of the core module
+#define ACME_DEV_SERVER_NAME "ledev2.kbauer.at"
+#define ACME_DEV_CONF_DIR "conf"
 
-#define CERT_PATH "conf/cert.pem"
-#define KEY_PATH "conf/cert.key"
-#define FROM_CERT_PATH "../conf/cert.pem"
-#define FROM_KEY_PATH "../conf/cert.key"
+// Makros which could also form config directives later
+#define ACME_DIR "acme"
+#define ACME_LIVE_DIR "live"
+#define ACME_CERT_TRUSTED "chain.pem"
+#define ACME_CERT_KEY "privkey.pem"
+#define ACME_CERT "fullchain.pem"
 
 //static ngx_int_t ngx_http_acme_handler(ngx_http_request_t *r);
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -85,49 +95,62 @@ ngx_module_t ngx_http_acme_module = {
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_ssl_srv_conf_t *sscf; /* pointer to core location configuration */
-    ngx_copy_file_t   cpyf;
-    int ret;
+//    ngx_copy_file_t   cpyf;
+//    int ret;
 
+    /*
+     * TODO: Get the config directory path (e.g. /etc/nginx)
+     */
+
+
+    /*
+     * TODO: Init acme dir (mkdirs)
+     */
+
+
+    /*
+     * TODO: Install certificate
+     */
+//    ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Installing certificate and key");
+//
+//    cpyf.size = -1;
+//    cpyf.buf_size = 0;
+//    cpyf.access =  NGX_FILE_DEFAULT_ACCESS;
+//    cpyf.time = -1;
+//    cpyf.log = cf->log;
+//
+//    // Copy certificate
+//    ret = ngx_copy_file((u_char *)ACME_DEV_FROM_CERT_PATH, (u_char *)ACME_DEV_CERT_PATH, &cpyf);
+//
+//    // Copy private key
+//    if(ret == NGX_OK) {
+//        // Only 0600 access for private key
+//        cpyf.access = NGX_FILE_OWNER_ACCESS;
+//
+//        ret = ngx_copy_file((u_char *)ACME_DEV_FROM_KEY_PATH, (u_char *)ACME_DEV_KEY_PATH, &cpyf);
+//    }
+//
+//    if(ret != NGX_OK) {
+//        ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "Installing the certificate or private key in place failed");
+//        return NGX_CONF_ERROR;
+//    }
+
+    /*
+     * Fool the SSL module into using the ACME certificates
+     */
     // Get SSL module configuration
     sscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_ssl_module);
 
     // TODO (KK) Report error when ssl configs are not set (acme w/o ssl configured in the same server context is an error)
-    if(sscf && sscf->certificate.data) {
-        ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Found SSL certificate path: %s", sscf->certificate.data);
 
-        // Spoof ssl cert
-//        ngx_str_set(&sscf->certificate, "i-dont-exist.pem");
+    if(sscf) {
+//        ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Found SSL certificate path: %s", sscf->certificate.data);
+
+        // Spoof SSL cert
+        ngx_str_set(&sscf->certificate, ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT);
+        ngx_str_set(&sscf->certificate_key, ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT_KEY);
     }
 
-    /* Begin certificate installation */
-
-    // TODO (KK) Derive CERT_PATH and KEY_PATH from SSL module
-
-    ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Copying certificate and key");
-
-    cpyf.size = -1;
-    cpyf.buf_size = 0;
-    cpyf.access =  NGX_FILE_DEFAULT_ACCESS;
-    cpyf.time = -1;
-    cpyf.log = cf->log;
-
-    // Copy certificate
-    ret = ngx_copy_file((u_char *)FROM_CERT_PATH, (u_char *)CERT_PATH, &cpyf);
-
-    // Copy private key
-    if(ret == NGX_OK) {
-        // Only 0600 access for private key
-        cpyf.access = NGX_FILE_OWNER_ACCESS;
-
-        ret = ngx_copy_file((u_char *)FROM_KEY_PATH, (u_char *)KEY_PATH, &cpyf);
-    }
-
-    if(ret != NGX_OK) {
-        ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "Copying the certificate or private key in place failed");
-        return NGX_CONF_ERROR;
-    }
-
-    /* End certificate installation */
 
     return NGX_CONF_OK;
 } /* ngx_http_acme */

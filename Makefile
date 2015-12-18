@@ -6,12 +6,14 @@ SRC_LINK := "http://nginx.org/download/$(SRC_VERSION).tar.gz"
 SRC_PATH := $(ROOT_DIR)/$(SRC_VERSION)
 RUN_PATH := $(ROOT_DIR)/run
 
-MOD_SRC := $(ROOT_DIR)/ngx_http_acme_module.c
-MOD_CFG := $(ROOT_DIR)/config
+MODULE_SRC := $(ROOT_DIR)/ngx_http_acme_module.c
+MODULE_CFG := $(ROOT_DIR)/config
 
-MYCONFIG := $(ROOT_DIR)/conf/nginx.conf
+EXAMPLE_DIR := $(ROOT_DIR)/example
+EXAMPLE_CONFIG := $(EXAMPLE_DIR)/nginx.conf
 
-RUN_CONFIG := $(RUN_PATH)/conf/nginx.conf
+RUN_CONF_DIR := $(RUN_PATH)/conf
+RUN_CONFIG := $(RUN_CONF_DIR)/nginx.conf
 RUN_BIN := $(RUN_PATH)/sbin/nginx
 PID_FILE := $(RUN_PATH)/logs/nginx.pid
 
@@ -22,6 +24,15 @@ CONFIGURE_OPTS := --prefix="$(RUN_PATH)" --with-http_ssl_module --add-module="$(
 
 # For debug output
 CONFIGURE_OPTS := $(CONFIGURE_OPTS) --with-debug
+
+# Dev variables
+EXAMPLE_CERT := $(EXAMPLE_DIR)/cert.pem
+EXAMPLE_CERT_KEY := $(EXAMPLE_DIR)/cert-key.pem
+ACME_DIR := $(RUN_CONF_DIR)/acme
+ACME_SERVER_NAME := ledev2.kbauer.at
+ACME_CERT_DIR := $(ACME_DIR)/live/$(ACME_SERVER_NAME)
+ACME_CERT := $(ACME_CERT_DIR)/fullchain.pem
+ACME_CERT_KEY := $(ACME_CERT_DIR)/privkey.pem
 
 .PHONY: default source configure build install run \
 	clean kill reinstall clean-install clean-all \
@@ -76,13 +87,17 @@ clean-all: clean clean-source
 # File targets
 #
 
-$(SRC_MKFILE): $(MOD_CFG)
+$(SRC_MKFILE): $(MODULE_CFG)
 	@test -d $(SRC_PATH) || (echo "You have to run 'make source' first to download the Nginx source code"; exit 2)
 	cd "$(SRC_PATH)"; ./configure $(CONFIGURE_OPTS)
 
-$(SRC_BIN): $(SRC_MKFILE) $(MOD_SRC)
+$(SRC_BIN): $(SRC_MKFILE) $(MODULE_SRC)
 	$(MAKE) -C "$(SRC_PATH)"
 
 $(RUN_BIN): $(SRC_BIN)
 	$(MAKE) -C "$(SRC_PATH)" install
-	cp "$(MYCONFIG)" "$(RUN_CONFIG)"
+	# Install example files
+	cp "$(EXAMPLE_CONFIG)" "$(RUN_CONFIG)"
+	mkdir -p "$(ACME_CERT_DIR)"
+	cp "$(EXAMPLE_CERT)" "$(ACME_CERT)"
+	cp "$(EXAMPLE_CERT_KEY)" "$(ACME_CERT_KEY)"
