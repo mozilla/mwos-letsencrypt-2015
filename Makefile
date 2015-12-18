@@ -1,6 +1,6 @@
 ROOT_DIR := $(strip $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST)))))
 
-SRC_VERSION := nginx-1.9.5
+SRC_VERSION := nginx-1.9.9
 SRC_LINK := "http://nginx.org/download/$(SRC_VERSION).tar.gz"
 
 SRC_PATH := $(ROOT_DIR)/$(SRC_VERSION)
