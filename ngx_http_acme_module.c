@@ -10,6 +10,8 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+#include <curl/curl.h>
+
 /*
  * Makros which could also form config directives later
  */
@@ -20,6 +22,7 @@
 #define ACME_CERT "fullchain.pem"
 #define ACME_ACCOUNT_RSA_BITS 2048
 #define ACME_ACCOUNT_RSA_EXP "65537"
+#define ACME_SERVER "https://acme-staging.api.letsencrypt.org"
 
 /*
  * Temporary dev makros
@@ -37,6 +40,7 @@
 
 
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf);
 
 static ngx_int_t ngx_http_acme_init(ngx_conf_t *cf);
 
@@ -165,12 +169,18 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
     /*
+     * TODO: ACME stuff
+     */
+    ngx_http_acme_fetch_dir(cf, conf);
+
+    /*
      * Fool the SSL module into using the ACME certificates
      */
     // Get SSL module configuration
     sscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_ssl_module);
 
-    // TODO (KK) Report error when ssl configs are not set (acme w/o ssl configured in the same server context is an error)
+    // TODO (KK) Report warning when ssl configs are not set (acme w/o ssl activated in the same server context is an error)
+    // --> Maybe ignore acme config then and issue a warning
 
     if(sscf) {
 //        ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Found SSL certificate path: %s", sscf->certificate.data);
@@ -183,6 +193,34 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     return NGX_CONF_OK;
 } /* ngx_http_acme */
+
+
+static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf)
+{
+    CURL *curl;
+    CURLcode res;
+
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+
+    curl = curl_easy_init();
+
+    if(curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, ACME_SERVER "/directory");
+
+        /* Perform the request, res will get the return code */
+        res = curl_easy_perform(curl);
+        /* Check for errors */
+        if(res != CURLE_OK)
+            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+
+        /* always cleanup */
+        curl_easy_cleanup(curl);
+    }
+
+    curl_global_cleanup();
+
+    return NGX_CONF_OK;
+}
 
 /**
  * TODO: delete
