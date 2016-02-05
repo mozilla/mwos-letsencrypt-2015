@@ -6,9 +6,16 @@
 
 ## Dependencies
 
+### Makefile dependencies
+
 To build this module you need all the tools installed which you would also need to
-build the Nginx server alone. In addition you need `curl` to download the source code
-of the server using make.
+build the Nginx server alone. In addition you need `curl` if you download the source code
+of Nginx using `make source` (recommended).
+
+### Libraries
+
+The module uses libcurl for making the HTTP calls to the ACME server and libjansson for
+parsing and creating the JSON strings according to the ACME protocol.
 
 ## Installation
 

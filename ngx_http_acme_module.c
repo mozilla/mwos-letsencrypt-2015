@@ -11,6 +11,7 @@
 #include <ngx_http.h>
 
 #include <curl/curl.h>
+#include <jansson.h>
 
 /*
  * Makros which could also form config directives later
@@ -41,7 +42,6 @@
 
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf);
-
 static ngx_int_t ngx_http_acme_init(ngx_conf_t *cf);
 
 /**
@@ -199,6 +199,8 @@ static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf)
 {
     CURL *curl;
     CURLcode res;
+    FILE *data_stream;
+    ngx_str_t data;
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
@@ -207,17 +209,35 @@ static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf)
     if(curl) {
         curl_easy_setopt(curl, CURLOPT_URL, ACME_SERVER "/directory");
 
-        /* Perform the request, res will get the return code */
-        res = curl_easy_perform(curl);
-        /* Check for errors */
-        if(res != CURLE_OK)
-            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        /* Setup the stream for the reponse data */
+        data_stream = open_memstream((char **) &data.data, &data.len);
+
+        if(data_stream != NULL) {
+
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, data_stream);
+
+            /* Perform the request, res will get the return code */
+            res = curl_easy_perform(curl);
+            /* Check for errors */
+            if(res != CURLE_OK)
+                fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        }
 
         /* always cleanup */
         curl_easy_cleanup(curl);
+
+        fclose(data_stream);
     }
 
-    curl_global_cleanup();
+    //    curl_global_cleanup();
+
+    /* Now all the returned JSON is in the data variable */
+
+    /*
+     * TODO: Parsing returned JSON
+     */
+    fprintf(stdout, "%s", data.data);
+    fflush(stdout);
 
     return NGX_CONF_OK;
 }
