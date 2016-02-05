@@ -199,8 +199,14 @@ static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf)
 {
     CURL *curl;
     CURLcode res;
+
     FILE *data_stream;
     ngx_str_t data;
+
+    json_t *root;
+    json_error_t error;
+
+    /* Begin cURL part */
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
@@ -226,18 +232,50 @@ static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf)
         /* always cleanup */
         curl_easy_cleanup(curl);
 
+        // Null terminate the future string
+        fputc('\0', data_stream);
         fclose(data_stream);
     }
 
     //    curl_global_cleanup();
 
+    /* End cURL part */
+
     /* Now all the returned JSON is in the data variable */
 
     /*
-     * TODO: Parsing returned JSON
+     * Parsing returned JSON
      */
-    fprintf(stdout, "%s", data.data);
+    fwrite(data.data, sizeof(char), data.len, stdout);
+    printf("\n");
     fflush(stdout);
+
+    /* Begin Jansson part */
+
+    root = json_loads((char *) data.data, 0, &error);
+    free(data.data);
+
+    if(!root)
+    {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+                "Error parsing JSON: on line %d: %s\n", error.line, error.text);
+        return NGX_CONF_ERROR;
+    }
+
+    /* The part below is different for each ACME request */
+
+    if(!json_is_object(root)) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+                "Error parsing JSON: directory data is not an object\n");
+        json_decref(root);
+        return NGX_CONF_ERROR;
+    }
+
+    // TODO extract the JSON to a custom data type
+
+    json_decref(root);
+
+    /* End Jansson part */
 
     return NGX_CONF_OK;
 }
