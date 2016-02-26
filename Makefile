@@ -6,7 +6,7 @@ SRC_LINK := "http://nginx.org/download/$(SRC_VERSION).tar.gz"
 SRC_PATH := $(ROOT_DIR)/$(SRC_VERSION)
 RUN_PATH := $(ROOT_DIR)/run
 
-MODULE_SRC := $(ROOT_DIR)/ngx_http_acme_module.c
+MODULE_SRC := $(ROOT_DIR)/ngx_http_acme_module.c $(ROOT_DIR)/ngx_http_acme_module.h $(ROOT_DIR)/ngx_http_acme_lib.h
 MODULE_CFG := $(ROOT_DIR)/config
 
 EXAMPLE_DIR := $(ROOT_DIR)/example
