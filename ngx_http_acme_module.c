@@ -265,6 +265,11 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
     json_t *output;
     ngx_http_acme_sign_json(cf, conf, test_string, rsa, &output);
 
+    char *output_str = json_dumps(output, 0);
+    ngx_str_t x = ngx_string(output_str);
+
+    println_debug("JWS string: ", &x);
+
 
     RSA_free(rsa);
 
@@ -318,6 +323,7 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
      *   "DtEhU3ljbEg8L38VWAfUAqOyKAM6-Xx-F4GawxaepmXFCgfTjDxw5djxLa8ISlSApmWQxfKTUJqPP3-Kg6NU1Q"
      * }
      */
+
 
 
 
