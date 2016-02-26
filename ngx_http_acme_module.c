@@ -295,6 +295,30 @@ static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf)
 
 static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, json_t **flattened_jws)
 {
+    *flattened_jws = json_object();
+
+    /*
+     * Structure according to RFC7515:
+     *
+     * {
+     *  "payload":"<payload contents>",
+     *  "protected":"<integrity-protected header contents>",
+     *  "header":<non-integrity-protected header contents>,
+     *  "signature":"<signature contents>"
+     * }
+     *
+     * Example:
+     *
+     * {
+     *  "payload":
+     *   "eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ",
+     *  "protected":"eyJhbGciOiJFUzI1NiJ9",
+     *  "header": {"kid":"e9bc097a-ce51-4036-9562-d2ade882db0d"},
+     *  "signature":
+     *   "DtEhU3ljbEg8L38VWAfUAqOyKAM6-Xx-F4GawxaepmXFCgfTjDxw5djxLa8ISlSApmWQxfKTUJqPP3-Kg6NU1Q"
+     * }
+     */
+
 
 
     return NGX_CONF_OK;
