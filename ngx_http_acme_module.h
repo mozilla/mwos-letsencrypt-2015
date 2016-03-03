@@ -21,4 +21,12 @@
 #define ACME_SERVER "https://acme-staging.api.letsencrypt.org"
 
 
+typedef enum {
+    GET,
+    POST
+} ngx_http_acme_http_method_t;
+
+
+#define ngx_string_dynamic(str)     { strlen(str), (u_char *) str }
+
 #endif /* NGX_HTTP_ACME_MODULE_H_ */

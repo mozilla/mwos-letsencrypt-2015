@@ -46,8 +46,8 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf);
 static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf);
 static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, json_t **flattened_jws);
-static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, json_t *request_json, json_t **response_json);
-static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, ngx_str_t request_data, ngx_str_t *response_data);
+static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, json_t *request_json, json_t **response_json);
+static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, ngx_str_t request_data, ngx_str_t *response_data);
 static ngx_int_t ngx_http_acme_init(ngx_conf_t *cf);
 
 /**
@@ -116,24 +116,24 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_ssl_srv_conf_t *sscf; /* pointer to core location configuration */
     int ret;
 
-    // TODO: Pull the different parts out as own methods for readability
+    // TODO (KK) Pull the different parts out as own methods for readability
 
     /*
-     * TODO: Get the config directory path (e.g. /etc/nginx)
+     * TODO (KK) Get the config directory path (e.g. /etc/nginx)
      */
 
 
     /*
-     * TODO: Init acme dir (mkdirs)
+     * TODO (KK) Init acme dir (mkdirs)
      */
 
     /*
-     * TODO: ACME stuff
+     * TODO (KK) ACME stuff
      */
     ngx_http_acme_main(cf, conf);
 
     /*
-     * TODO: Install certificate (right now it just copies an example cert)
+     * TODO (KK) Install certificate (right now it just copies an example cert)
      */
     {
         ngx_copy_file_t   cpyf;
@@ -225,7 +225,7 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
      */
     RSA *rsa = NULL;
 
-    /* TODO Pull out in own method */
+    /* TODO (KK) Pull out in own method */
     if(1 /* if no account key exists */)
     {
         /*
@@ -238,15 +238,15 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
         rsa = RSA_new();
         ret = BN_dec2bn(&e, ACME_ACCOUNT_RSA_EXP);
         if(ret == 0) {
-            // TODO Report error
+            // TODO (KK) Report error
         }
 
         ret = RSA_generate_key_ex(rsa, ACME_ACCOUNT_RSA_BITS, e, NULL);
         if(ret == 0) {
-            // TODO Report error
+            // TODO (KK) Report error
         }
 
-        // TODO Save account key in file
+        // TODO (KK) Save account key in file
 
         BN_free(e);
     } else {
@@ -256,19 +256,29 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
     }
 
 
-    /* Test: Fetch ACME dir */
+    /* TODO (KK) Test - remove later: Fetch ACME dir */
     ngx_http_acme_fetch_dir(cf, conf);
 
 
-    /* Test: Sign off JSON */
-    json_t *test_string = json_string("Test string");
-    json_t *output;
-    ngx_http_acme_sign_json(cf, conf, test_string, rsa, &output);
+    json_t *test_obj;
+    json_t *test_output;
 
-    char *output_str = json_dumps(output, 0);
-    ngx_str_t x = ngx_string(output_str);
+    /* TODO (KK) Test - remove later: Send request data */
+    test_obj = json_object();
+    json_object_set_new(test_obj, "test", json_string("Test string"));
+    ngx_http_acme_json_request(cf, conf, "http://www.foaas.com/operations", GET, json_null(), &test_output);
 
-    println_debug("JWS string: ", &x);
+    char *output_str = json_dumps(test_output, 0);
+    println_debug("Returned JSON string: ", &((ngx_str_t)ngx_string_dynamic(output_str)));
+
+
+    /* TODO (KK) Test - remove later: Sign off JSON */
+    test_obj = json_object();
+    json_object_set_new(test_obj, "test", json_string("Test string"));
+    ngx_http_acme_sign_json(cf, conf, test_obj, rsa, &test_output);
+
+    output_str = json_dumps(test_output, 0);
+    println_debug("JWS string: ", &((ngx_str_t)ngx_string_dynamic(output_str)));
 
 
     RSA_free(rsa);
@@ -283,14 +293,14 @@ static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf)
 //    json_error_t error;
 
     /* Make JSON request */
-    if(ngx_http_acme_json_request(cf, conf, ACME_SERVER "/directory", json_null(), &root_object) != NGX_CONF_OK) {
+    if(ngx_http_acme_json_request(cf, conf, ACME_SERVER "/directory", GET, json_null(), &root_object) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while making JSON request\n");
         return NGX_CONF_ERROR;
     }
 
     /* The part below is different for each ACME request */
 
-    // TODO extract the JSON to a custom data type
+    // TODO (KK) extract the JSON to a custom data type
 
     json_decref(root_object);
 
@@ -331,7 +341,7 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
 } /* ngx_http_acme_sign_json */
 
 
-static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, json_t *request_json, json_t **response_json)
+static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, json_t *request_json, json_t **response_json)
 {
     ngx_str_t response_data;
     ngx_str_t request_data;
@@ -353,7 +363,7 @@ static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, j
     }
 
     /* Make request */
-    if(ngx_http_acme_plain_request(cf, conf, url, request_data, &response_data) != NGX_CONF_OK) {
+    if(ngx_http_acme_plain_request(cf, conf, url, http_method, request_data, &response_data) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while making request\n");
         return NGX_CONF_ERROR;
     }
@@ -379,12 +389,12 @@ static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, j
 
     /* The part below is different for each ACME request */
 
-    if(!json_is_object(*response_json)) {
-        ngx_log_error(NGX_LOG_ERR, cf->log, 0,
-                "Error parsing JSON: received data is not a JSON object\n");
-        json_decref(*response_json);
-        return NGX_CONF_ERROR;
-    }
+//    if(!json_is_object(*response_json)) {
+//        ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+//                "Error parsing JSON: received data is not a JSON object\n");
+//        json_decref(*response_json);
+//        return NGX_CONF_ERROR;
+//    }
 
     /* End Jansson part */
 
@@ -392,13 +402,13 @@ static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, j
 } /* ngx_http_acme_json_request */
 
 
-static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, ngx_str_t request_data, ngx_str_t *response_data)
+static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, ngx_str_t request_data, ngx_str_t *response_data)
 {
     CURL *curl;
     CURLcode res;
+    struct curl_slist *header_list = NULL;
 
     FILE *response_data_stream;
-//    FILE *request_data_stream;
 
     /* Begin cURL part */
 
@@ -411,13 +421,38 @@ static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, 
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
 
-    // TODO Implement request data sending
+    /*
+     * Setting the HTTP method
+     */
+
+    if(http_method == GET) {
+        curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    } else if(http_method == POST) {
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    }
+
+    /*
+     * Setting the request data handling
+     */
+
     if(request_data.data != NULL) {
 
+        // TODO (KK) Add method parameter for the header list to be dynamic in e.g. the content type, since it doesn't always have to be JSON ;)
+        header_list = curl_slist_append(header_list, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
 
+        /* size of the data to copy from the buffer and send in the request */
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, request_data.len);
+
+        /* send data from the local stack */
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request_data.data);
 
         println_debug("Request data: ", &request_data);
     }
+
+    /*
+     * Setting the response data handling
+     */
 
     /* Setup the stream for the reponse data */
     response_data_stream = open_memstream((char **) &response_data->data, &response_data->len);
@@ -427,10 +462,18 @@ static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, 
         return NGX_CONF_ERROR;
     }
 
+    /*
+     * ATTENTION: Setting CURLOPT_WRITEDATA without CURLOPT_WRITEFUNCTION does not work on Windows
+     * according to https://curl.haxx.se/libcurl/c/CURLOPT_WRITEDATA.html
+     */
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, response_data_stream);
 
-    /* Perform the request, res will get the return code */
+    /*
+     * Perform the request
+     */
+
     res = curl_easy_perform(curl);
+
     /* Check for errors */
     if(res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
@@ -448,7 +491,7 @@ static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, 
 } /* ngx_http_acme_plain_request */
 
 /**
- * TODO: delete
+ * TODO (KK) delete
  * This entry point is too late, we will probably never use it.
  */
 static ngx_int_t ngx_http_acme_init(ngx_conf_t *cf)
