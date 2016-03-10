@@ -48,7 +48,7 @@
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf);
 static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf);
-static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, json_t **flattened_jws);
+static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, ngx_str_t nonce, json_t **flattened_jws);
 static char *ngx_http_acme_create_jwk(ngx_conf_t *cf, void *conf, RSA *key, json_t **jwk);
 static char *ngx_http_acme_read_jwk(ngx_conf_t *cf, void *conf, ngx_str_t jwk_str, RSA **key);
 static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, json_t *request_json, json_t **response_json);
@@ -292,7 +292,7 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
 
     /* TODO (KK) Test - remove later: Sign off JSON */
     test_obj = json_pack("{s:s}", "test", "Test string");
-    if(ngx_http_acme_sign_json(cf, conf, test_obj, rsa, &test_output) != NGX_CONF_OK) {
+    if(ngx_http_acme_sign_json(cf, conf, test_obj, rsa, (ngx_str_t)ngx_string("test-nonce"), &test_output) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Creating JWS failed");
         return NGX_CONF_ERROR;
     }
@@ -332,7 +332,7 @@ static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf)
 } /* ngx_http_acme_fetch_dir */
 
 
-static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, json_t **flattened_jws)
+static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, ngx_str_t nonce, json_t **flattened_jws)
 {
     /*
      * Structure according to RFC7515:
@@ -384,16 +384,18 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
     // jwk header
     if(ngx_http_acme_create_jwk(cf, conf, key, &jwk) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Failed to create the JWK from the account key");
+        ngx_free(serialized_payload.data);
+        ngx_free(encoded_payload.data);
         return NGX_CONF_ERROR;
     }
 
-    // TODO (KK) nonce header
-
     // Pack header into JSON
     // TODO (KK) add alg header
-    header = json_pack("{s:s, s:s, s:o}", "alg", "", "nonce", "", "jwk", jwk);
+    header = json_pack("{s:s, s:s%, s:o}", "alg", "", "nonce", nonce.data, nonce.len, "jwk", jwk);
     if(header == NULL) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error packing JWS header");
+        ngx_free(serialized_payload.data);
+        ngx_free(encoded_payload.data);
         return NGX_CONF_ERROR;
     }
 
@@ -409,6 +411,13 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
      * TODO (KK) Create signature
      */
 
+    // Create signing input
+    // = ASCII(BASE64URL(UTF8(JWS Protected Header)) || '.' || BASE64URL(JWS Payload))
+
+    // Compute the signature
+
+
+    // base64url encode the signature
 
 
     /*
@@ -419,14 +428,16 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
             "protected", protected_header.data, protected_header.len,
             "signature", "test", 4
             );
+
+    ngx_free(protected_header.data);
+    ngx_free(serialized_payload.data);
+    ngx_free(encoded_payload.data);
+
     if(*flattened_jws == NULL) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error serializing flattened JWS");
         return NGX_CONF_ERROR;
     }
 
-    ngx_free(protected_header.data);
-    ngx_free(serialized_payload.data);
-    ngx_free(encoded_payload.data);
 
     return NGX_CONF_OK;
 } /* ngx_http_acme_sign_json */
@@ -565,7 +576,7 @@ static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, n
     return NGX_CONF_OK;
 } /* ngx_http_acme_json_request */
 
-
+// TODO (KK) Add output parameter to pass back the header values of the response
 static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, ngx_str_t request_data, ngx_str_t *response_data)
 {
     CURL *curl;
