@@ -302,6 +302,7 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
 
     json_decref(test_obj);
     json_decref(test_output);
+    ngx_free(output_str);
 
 
     RSA_free(rsa);
@@ -365,37 +366,67 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
 
     json_t *jwk;
     json_t *header;
+    ngx_str_t protected_header, serialized_payload, encoded_payload, tmp;
+
+    /*
+     * Encode payload
+     */
+
+    serialized_payload = (ngx_str_t)ngx_string_dynamic(json_dumps(payload, 0));
+    encoded_payload.len = serialized_payload.len;
+    encoded_payload.data = ngx_alloc(ngx_base64_encoded_length(encoded_payload.len), cf->log);
+    ngx_encode_base64url(&encoded_payload, &serialized_payload);
 
     /*
      * Create header
      */
+
     // jwk header
     if(ngx_http_acme_create_jwk(cf, conf, key, &jwk) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Failed to create the JWK from the account key");
         return NGX_CONF_ERROR;
     }
 
-    // nonce header
+    // TODO (KK) nonce header
 
     // Pack header into JSON
     // TODO (KK) add alg header
-    header = json_pack("{s:s, s:o}", "alg", "", "jwk", jwk);
+    header = json_pack("{s:s, s:s, s:o}", "alg", "", "nonce", "", "jwk", jwk);
     if(header == NULL) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error packing JWS header");
         return NGX_CONF_ERROR;
     }
 
     // Serialize and base64url encode header
+    tmp = (ngx_str_t)ngx_string_dynamic(json_dumps(header, 0));
+    protected_header.len = tmp.len;
+    protected_header.data = ngx_alloc(ngx_base64_encoded_length(protected_header.len), cf->log);
+    ngx_encode_base64url(&protected_header, &tmp);
+    ngx_free(tmp.data);
+    json_decref(header);
+
+    /*
+     * TODO (KK) Create signature
+     */
+
 
 
     /*
      * Create flattened JWS serialization
      */
-    *flattened_jws = json_pack("{s:o}", "header", header);
+    *flattened_jws = json_pack("{s:s%,s:s%,s:s%}",
+            "payload", encoded_payload.data, encoded_payload.len,
+            "protected", protected_header.data, protected_header.len,
+            "signature", "test", 4
+            );
     if(*flattened_jws == NULL) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error serializing flattened JWS");
         return NGX_CONF_ERROR;
     }
+
+    ngx_free(protected_header.data);
+    ngx_free(serialized_payload.data);
+    ngx_free(encoded_payload.data);
 
     return NGX_CONF_OK;
 } /* ngx_http_acme_sign_json */
@@ -413,7 +444,6 @@ static char *ngx_http_acme_create_jwk(ngx_conf_t *cf, void *conf, RSA *key, json
     e.data = ngx_alloc(ngx_base64_encoded_length(e.len), cf->log);
     ngx_encode_base64url(&e, &tmp);
     ngx_free(tmp.data);
-    ngx_str_null(&tmp);
 
     // Baser64url encode n
     tmp.len = BN_num_bytes(key->n);
@@ -423,10 +453,6 @@ static char *ngx_http_acme_create_jwk(ngx_conf_t *cf, void *conf, RSA *key, json
     n.data = ngx_alloc(ngx_base64_encoded_length(n.len), cf->log);
     ngx_encode_base64url(&n, &tmp);
     ngx_free(tmp.data);
-    ngx_str_null(&tmp);
-
-    println_debug("base64url encode of e: ", &e);
-    println_debug("base64url encode of n: ", &n);
 
     *jwk = json_pack("{s:s, s:s%, s:s%}", "kty", "RSA", "e", e.data, e.len, "n", n.data, n.len);
     if(*jwk == NULL) {
