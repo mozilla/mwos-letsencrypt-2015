@@ -366,15 +366,16 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
 
     json_t *jwk;
     json_t *header;
-    ngx_str_t protected_header, serialized_payload, encoded_payload, tmp;
+    ngx_str_t encoded_protected_header, serialized_payload, encoded_payload, tmp, signing_input;
+    u_char *tmp_char_p;
 
     /*
      * Encode payload
      */
 
     serialized_payload = (ngx_str_t)ngx_string_dynamic(json_dumps(payload, 0));
-    encoded_payload.len = serialized_payload.len;
-    encoded_payload.data = ngx_alloc(ngx_base64_encoded_length(encoded_payload.len), cf->log);
+    encoded_payload.len = ngx_base64_encoded_length(serialized_payload.len);
+    encoded_payload.data = ngx_alloc(encoded_payload.len, cf->log);
     ngx_encode_base64url(&encoded_payload, &serialized_payload);
 
     /*
@@ -401,9 +402,9 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
 
     // Serialize and base64url encode header
     tmp = (ngx_str_t)ngx_string_dynamic(json_dumps(header, 0));
-    protected_header.len = tmp.len;
-    protected_header.data = ngx_alloc(ngx_base64_encoded_length(protected_header.len), cf->log);
-    ngx_encode_base64url(&protected_header, &tmp);
+    encoded_protected_header.len = ngx_base64_encoded_length(tmp.len);
+    encoded_protected_header.data = ngx_alloc(encoded_protected_header.len, cf->log);
+    ngx_encode_base64url(&encoded_protected_header, &tmp);
     ngx_free(tmp.data);
     json_decref(header);
 
@@ -413,11 +414,20 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
 
     // Create signing input
     // = ASCII(BASE64URL(UTF8(JWS Protected Header)) || '.' || BASE64URL(JWS Payload))
+    signing_input.len = encoded_protected_header.len + strlen(".") + encoded_payload.len;
+    signing_input.data = ngx_alloc(signing_input.len, cf->log);
+    tmp_char_p = ngx_copy(signing_input.data, encoded_protected_header.data, encoded_protected_header.len);
+    tmp_char_p = ngx_copy(tmp_char_p, ".", strlen("."));
+    tmp_char_p = ngx_copy(tmp_char_p, encoded_payload.data, encoded_payload.len);
 
-    // Compute the signature
+    println_debug("Signing input: ", &signing_input);
+
+    // TODO (KK) Compute the signature
 
 
-    // base64url encode the signature
+    ngx_free(signing_input.data);
+
+    // TODO (KK) base64url encode the signature
 
 
     /*
@@ -425,11 +435,11 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
      */
     *flattened_jws = json_pack("{s:s%,s:s%,s:s%}",
             "payload", encoded_payload.data, encoded_payload.len,
-            "protected", protected_header.data, protected_header.len,
+            "protected", encoded_protected_header.data, encoded_protected_header.len,
             "signature", "test", 4
             );
 
-    ngx_free(protected_header.data);
+    ngx_free(encoded_protected_header.data);
     ngx_free(serialized_payload.data);
     ngx_free(encoded_payload.data);
 
@@ -451,8 +461,8 @@ static char *ngx_http_acme_create_jwk(ngx_conf_t *cf, void *conf, RSA *key, json
     tmp.len = BN_num_bytes(key->e);
     tmp.data = ngx_alloc(tmp.len, cf->log);
     tmp.len = BN_bn2bin(key->e, tmp.data);
-    e.len = tmp.len;
-    e.data = ngx_alloc(ngx_base64_encoded_length(e.len), cf->log);
+    e.len = ngx_base64_encoded_length(tmp.len);
+    e.data = ngx_alloc(e.len, cf->log);
     ngx_encode_base64url(&e, &tmp);
     ngx_free(tmp.data);
 
@@ -460,8 +470,8 @@ static char *ngx_http_acme_create_jwk(ngx_conf_t *cf, void *conf, RSA *key, json
     tmp.len = BN_num_bytes(key->n);
     tmp.data = ngx_alloc(tmp.len, cf->log);
     tmp.len = BN_bn2bin(key->n, tmp.data);
-    n.len = tmp.len;
-    n.data = ngx_alloc(ngx_base64_encoded_length(n.len), cf->log);
+    n.len = ngx_base64_encoded_length(tmp.len);
+    n.data = ngx_alloc(n.len, cf->log);
     ngx_encode_base64url(&n, &tmp);
     ngx_free(tmp.data);
 
