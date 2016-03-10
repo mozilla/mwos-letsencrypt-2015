@@ -10,6 +10,9 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+#include <inttypes.h>
+#include <string.h>
+
 #include <curl/curl.h>
 #include <jansson.h>
 
@@ -24,11 +27,11 @@
 // This should later be replaced with the value of the server_name directive of the core module
 #define ACME_DEV_SERVER_NAME "ledev2.kbauer.at"
 
-#define ACME_DEV_CERT_PATH (ACME_DEV_CONF_DIR "/" ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT)
-#define ACME_DEV_KEY_PATH (ACME_DEV_CONF_DIR "/" ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT_KEY)
+#define ACME_DEV_CERT_PATH ACME_DEV_CONF_DIR "/" ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT
+#define ACME_DEV_KEY_PATH ACME_DEV_CONF_DIR "/" ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT_KEY
 #define ACME_DEV_EXAMPLE_DIR "../example"
-#define ACME_DEV_FROM_CERT_PATH (ACME_DEV_EXAMPLE_DIR "/cert.pem")
-#define ACME_DEV_FROM_KEY_PATH (ACME_DEV_EXAMPLE_DIR "/cert-key.pem")
+#define ACME_DEV_FROM_CERT_PATH ACME_DEV_EXAMPLE_DIR "/cert.pem"
+#define ACME_DEV_FROM_KEY_PATH ACME_DEV_EXAMPLE_DIR "/cert-key.pem"
 
 /*
  * Function macros
@@ -46,6 +49,8 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf);
 static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf);
 static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, json_t **flattened_jws);
+static char *ngx_http_acme_create_jwk(ngx_conf_t *cf, void *conf, RSA *key, json_t **jwk);
+static char *ngx_http_acme_read_jwk(ngx_conf_t *cf, void *conf, ngx_str_t jwk_str, RSA **key);
 static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, json_t *request_json, json_t **response_json);
 static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, ngx_str_t request_data, ngx_str_t *response_data);
 static ngx_int_t ngx_http_acme_init(ngx_conf_t *cf);
@@ -158,7 +163,7 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
 
         if(ret != NGX_OK) {
-            ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "Installing the certificate or private key failed");
+            ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Installing the certificate or private key failed");
             return NGX_CONF_ERROR;
         }
     }
@@ -225,7 +230,7 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
      */
     RSA *rsa = NULL;
 
-    /* TODO (KK) Pull out in own method */
+    /* TODO (KK) Extract to own method */
     if(1 /* if no account key exists */)
     {
         /*
@@ -253,32 +258,50 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
         /*
          * Load existing account key from file
          */
+        // TODO (KK) Read JWK file to a string (and free it afterwards)
+
+        if(ngx_http_acme_read_jwk(cf, conf, (ngx_str_t)ngx_null_string, &rsa) != NGX_CONF_OK) {
+            ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Failed to load the account key from file");
+            return NGX_CONF_ERROR;
+        }
     }
 
 
     /* TODO (KK) Test - remove later: Fetch ACME dir */
-    ngx_http_acme_fetch_dir(cf, conf);
+    if(ngx_http_acme_fetch_dir(cf, conf) != NGX_CONF_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Failed to make directory request");
+        return NGX_CONF_ERROR;
+    }
 
 
     json_t *test_obj;
     json_t *test_output;
 
     /* TODO (KK) Test - remove later: Send request data */
-    test_obj = json_object();
-    json_object_set_new(test_obj, "test", json_string("Test string"));
-    ngx_http_acme_json_request(cf, conf, "http://www.foaas.com/operations", GET, json_null(), &test_output);
+    test_obj = json_pack("{s:s}", "test", "Test string");
+    if(ngx_http_acme_json_request(cf, conf, "http://www.foaas.com/operations", GET, json_null(), &test_output) != NGX_CONF_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "JSON request failed");
+        return NGX_CONF_ERROR;
+    }
 
     char *output_str = json_dumps(test_output, 0);
     println_debug("Returned JSON string: ", &((ngx_str_t)ngx_string_dynamic(output_str)));
 
+    json_decref(test_obj);
+    json_decref(test_output);
 
     /* TODO (KK) Test - remove later: Sign off JSON */
-    test_obj = json_object();
-    json_object_set_new(test_obj, "test", json_string("Test string"));
-    ngx_http_acme_sign_json(cf, conf, test_obj, rsa, &test_output);
+    test_obj = json_pack("{s:s}", "test", "Test string");
+    if(ngx_http_acme_sign_json(cf, conf, test_obj, rsa, &test_output) != NGX_CONF_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Creating JWS failed");
+        return NGX_CONF_ERROR;
+    }
 
     output_str = json_dumps(test_output, 0);
     println_debug("JWS string: ", &((ngx_str_t)ngx_string_dynamic(output_str)));
+
+    json_decref(test_obj);
+    json_decref(test_output);
 
 
     RSA_free(rsa);
@@ -294,7 +317,7 @@ static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf)
 
     /* Make JSON request */
     if(ngx_http_acme_json_request(cf, conf, ACME_SERVER "/directory", GET, json_null(), &root_object) != NGX_CONF_OK) {
-        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while making JSON request\n");
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while making JSON request");
         return NGX_CONF_ERROR;
     }
 
@@ -310,8 +333,6 @@ static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf)
 
 static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, json_t **flattened_jws)
 {
-    *flattened_jws = json_object();
-
     /*
      * Structure according to RFC7515:
      *
@@ -334,12 +355,129 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
      * }
      */
 
+    /*
+     * ACME restrictions:
+     * The JWS MUST use the Flattened JSON Serialization
+     * The JWS MUST be encoded using UTF-8
+     * The JWS Header or Protected Header MUST include “alg” and “jwk” fields
+     * The JWS MUST NOT have the value “none” in its “alg” field
+     */
+
+    json_t *jwk;
+    json_t *header;
+
+    /*
+     * Create header
+     */
+    // jwk header
+    if(ngx_http_acme_create_jwk(cf, conf, key, &jwk) != NGX_CONF_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Failed to create the JWK from the account key");
+        return NGX_CONF_ERROR;
+    }
+
+    // nonce header
+
+    // Pack header into JSON
+    // TODO (KK) add alg header
+    header = json_pack("{s:s, s:o}", "alg", "", "jwk", jwk);
+    if(header == NULL) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error packing JWS header");
+        return NGX_CONF_ERROR;
+    }
+
+    // Serialize and base64url encode header
 
 
+    /*
+     * Create flattened JWS serialization
+     */
+    *flattened_jws = json_pack("{s:o}", "header", header);
+    if(*flattened_jws == NULL) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error serializing flattened JWS");
+        return NGX_CONF_ERROR;
+    }
 
     return NGX_CONF_OK;
 } /* ngx_http_acme_sign_json */
 
+
+static char *ngx_http_acme_create_jwk(ngx_conf_t *cf, void *conf, RSA *key, json_t **jwk)
+{
+    ngx_str_t e, n, tmp;
+
+    // Baser64url encode e
+    tmp.len = BN_num_bytes(key->e);
+    tmp.data = ngx_alloc(tmp.len, cf->log);
+    tmp.len = BN_bn2bin(key->e, tmp.data);
+    e.len = tmp.len;
+    e.data = ngx_alloc(ngx_base64_encoded_length(e.len), cf->log);
+    ngx_encode_base64url(&e, &tmp);
+    ngx_free(tmp.data);
+    ngx_str_null(&tmp);
+
+    // Baser64url encode n
+    tmp.len = BN_num_bytes(key->n);
+    tmp.data = ngx_alloc(tmp.len, cf->log);
+    tmp.len = BN_bn2bin(key->n, tmp.data);
+    n.len = tmp.len;
+    n.data = ngx_alloc(ngx_base64_encoded_length(n.len), cf->log);
+    ngx_encode_base64url(&n, &tmp);
+    ngx_free(tmp.data);
+    ngx_str_null(&tmp);
+
+    println_debug("base64url encode of e: ", &e);
+    println_debug("base64url encode of n: ", &n);
+
+    *jwk = json_pack("{s:s, s:s%, s:s%}", "kty", "RSA", "e", e.data, e.len, "n", n.data, n.len);
+    if(*jwk == NULL) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Failed to pack JWK");
+        return NGX_CONF_ERROR;
+    }
+
+    ngx_free(e.data);
+    ngx_free(n.data);
+
+    return NGX_CONF_OK;
+} /* ngx_http_acme_create_jwk */
+
+//static char *ngx_http_acme_create_priv_jwk(ngx_conf_t *cf, void *conf, RSA *key, json_t **jwk)
+//{
+//    // TODO (KK) Create JWK with following information
+//    // d, e, n, q, p, qi, dp, dq
+//    // kty: RSA
+//
+//    return NGX_CONF_OK;
+//} /* ngx_http_acme_create_priv_jwk */
+
+static char *ngx_http_acme_read_jwk(ngx_conf_t *cf, void *conf, ngx_str_t jwk_str, RSA **key)
+{
+    json_t *jwk;
+    json_error_t error;
+
+    /*
+     * Deserialize JWK
+     */
+    jwk = json_loadb((char *) jwk_str.data, jwk_str.len, 0, &error);
+    free(jwk_str.data);
+    ngx_str_null(&jwk_str);
+
+    if(jwk == NULL)
+    {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+                "Error parsing JSON: on line %d: %s\n", error.line, error.text);
+        return NGX_CONF_ERROR;
+    }
+
+    // TODO (KK) Form RSA struct from JWK
+
+    return NGX_CONF_OK;
+} /* ngx_http_acme_create_jwk */
+
+//static char *ngx_http_acme_base64url_encode(ngx_conf_t *cf, void *conf, ngx_str_t input, ngx_str_t *output)
+//{
+//
+//    return NGX_CONF_OK;
+//} /* ngx_http_acme_base64url_encode */
 
 static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, json_t *request_json, json_t **response_json)
 {

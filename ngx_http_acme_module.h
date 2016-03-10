@@ -18,7 +18,8 @@
 #define ACME_CERT "fullchain.pem"
 #define ACME_ACCOUNT_RSA_BITS 2048
 #define ACME_ACCOUNT_RSA_EXP "65537"
-#define ACME_SERVER "https://acme-staging.api.letsencrypt.org"
+#define ACME_SERVER_DOMAIN "acme-staging.api.letsencrypt.org"
+#define ACME_SERVER "https://" ACME_SERVER_DOMAIN
 
 
 typedef enum {
