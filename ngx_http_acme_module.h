@@ -8,6 +8,8 @@
 #ifndef NGX_HTTP_ACME_MODULE_H_
 #define NGX_HTTP_ACME_MODULE_H_
 
+#define ACME_REPLAY_NONCE_HEADER "Replay-Nonce: "
+
 /*
  * Makros which could also form config directives later
  */
@@ -26,6 +28,22 @@ typedef enum {
     GET,
     POST
 } ngx_http_acme_http_method_t;
+
+/* linked-dictionary structure */
+typedef struct ngx_http_acme_sdict {
+    char *key;
+    size_t key_len;
+    char *value;
+    size_t value_len;
+    struct ngx_http_acme_sdict *next;
+} ngx_http_acme_sdict_t;
+
+/* linked-list structure */
+typedef struct ngx_http_acme_slist {
+    char *value;
+    size_t value_len;
+    struct ngx_http_acme_slist *next;
+} ngx_http_acme_slist_t;
 
 
 #define ngx_string_dynamic(str)     { strlen(str), (u_char *) str }

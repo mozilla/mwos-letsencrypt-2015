@@ -47,13 +47,25 @@
 
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf);
-static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf);
-static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, ngx_str_t nonce, json_t **flattened_jws);
+static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf, ngx_str_t *replay_nonce);
+static char *ngx_http_acme_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method,
+        json_t *request_json, RSA *key, ngx_str_t *replay_nonce, json_t **response_json,
+        ngx_http_acme_slist_t **response_headers);
+static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, ngx_str_t replay_nonce, json_t **flattened_jws);
 static char *ngx_http_acme_create_jwk(ngx_conf_t *cf, void *conf, RSA *key, json_t **jwk);
 static char *ngx_http_acme_read_jwk(ngx_conf_t *cf, void *conf, ngx_str_t jwk_str, RSA **key);
-static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, json_t *request_json, json_t **response_json);
-static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, ngx_str_t request_data, ngx_str_t *response_data);
+static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method,
+        json_t *request_json, json_t **response_json, ngx_http_acme_slist_t **response_headers);
+static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method,
+        ngx_str_t request_data, ngx_str_t *response_data, ngx_http_acme_slist_t **response_headers);
+static size_t ngx_http_acme_header_callback(char *buffer, size_t size, size_t nitems, void *userdata);
 static ngx_int_t ngx_http_acme_init(ngx_conf_t *cf);
+
+//static ngx_http_acme_sdict_t *ngx_http_acme_sdict_append_kv_pair(ngx_http_acme_sdict_t *sdict, ngx_str_t key, ngx_str_t value);
+//static void ngx_http_acme_sdict_free_all(ngx_http_acme_sdict_t *sdict);
+static ngx_http_acme_slist_t *ngx_http_acme_slist_append_entry(ngx_http_acme_slist_t *slist, ngx_str_t value);
+static void ngx_http_acme_slist_free_all(ngx_http_acme_slist_t *slist);
+
 
 /**
  * This module provided directive: acme.
@@ -132,8 +144,9 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
      * TODO (KK) Init acme dir (mkdirs)
      */
 
+
     /*
-     * TODO (KK) ACME stuff
+     * ACME communication - getting a certificate
      */
     ngx_http_acme_main(cf, conf);
 
@@ -224,6 +237,7 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
      */
 
     int ret;
+    ngx_str_t replay_nonce;
 
     /*
      * Load key pair for ACME account
@@ -267,8 +281,8 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
     }
 
 
-    /* TODO (KK) Test - remove later: Fetch ACME dir */
-    if(ngx_http_acme_fetch_dir(cf, conf) != NGX_CONF_OK) {
+    /* Fetch ACME dir - just to retrieve a replay nonce */
+    if(ngx_http_acme_fetch_dir(cf, conf, &replay_nonce) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Failed to make directory request");
         return NGX_CONF_ERROR;
     }
@@ -279,7 +293,7 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
 
     /* TODO (KK) Test - remove later: Send request data */
     test_obj = json_pack("{s:s}", "test", "Test string");
-    if(ngx_http_acme_json_request(cf, conf, "http://www.foaas.com/operations", GET, json_null(), &test_output) != NGX_CONF_OK) {
+    if(ngx_http_acme_json_request(cf, conf, "http://www.foaas.com/operations", GET, json_null(), &test_output, NULL) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "JSON request failed");
         return NGX_CONF_ERROR;
     }
@@ -292,7 +306,7 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
 
     /* TODO (KK) Test - remove later: Sign off JSON */
     test_obj = json_pack("{s:s}", "test", "Test string");
-    if(ngx_http_acme_sign_json(cf, conf, test_obj, rsa, (ngx_str_t)ngx_string("test-nonce"), &test_output) != NGX_CONF_OK) {
+    if(ngx_http_acme_sign_json(cf, conf, test_obj, rsa, replay_nonce, &test_output) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Creating JWS failed");
         return NGX_CONF_ERROR;
     }
@@ -311,28 +325,74 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
 } /* ngx_http_acme_main */
 
 
-static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf)
+static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf, ngx_str_t *replay_nonce)
 {
-    json_t *root_object;
+    json_t *response_json;
 //    json_error_t error;
+    ngx_http_acme_slist_t *response_headers = NULL;
 
     /* Make JSON request */
-    if(ngx_http_acme_json_request(cf, conf, ACME_SERVER "/directory", GET, json_null(), &root_object) != NGX_CONF_OK) {
+    if(ngx_http_acme_request(cf, conf, ACME_SERVER "/directory", GET, json_null(), NULL, replay_nonce, &response_json, &response_headers) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while making JSON request");
         return NGX_CONF_ERROR;
     }
 
-    /* The part below is different for each ACME request */
-
-    // TODO (KK) extract the JSON to a custom data type
-
-    json_decref(root_object);
+    ngx_http_acme_slist_free_all(response_headers);
+    json_decref(response_json);
 
     return NGX_CONF_OK;
 } /* ngx_http_acme_fetch_dir */
 
+static char *ngx_http_acme_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method,
+        json_t *request_json, RSA *key, ngx_str_t *replay_nonce, json_t **response_json,
+        ngx_http_acme_slist_t **response_headers)
+{
+    json_t *signed_request_json;
+    ngx_http_acme_slist_t *header = NULL;
 
-static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, ngx_str_t nonce, json_t **flattened_jws)
+    /* Sign JSON and create JWS from the request JSON data */
+    if(json_is_null(request_json)) {
+        signed_request_json = json_null();
+    } else {
+        if(ngx_http_acme_sign_json(cf, conf, request_json, key, *replay_nonce, &signed_request_json) != NGX_CONF_OK) {
+            ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Creating JWS failed");
+            return NGX_CONF_ERROR;
+        }
+    }
+
+    /* Make JSON request */
+    if(ngx_http_acme_json_request(cf, conf, url, http_method, signed_request_json, response_json, response_headers) != NGX_CONF_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while making JSON request");
+        return NGX_CONF_ERROR;
+    }
+
+    ngx_free(replay_nonce->data);
+    ngx_str_null(replay_nonce);
+    json_decref(signed_request_json);
+
+    /* Search for and extract replay nonce from response headers */
+    for(header = *response_headers; header != NULL; header = header->next) {
+        if(header->value_len < strlen(ACME_REPLAY_NONCE_HEADER))
+            continue;
+
+        if(ngx_strncmp(header->value, ACME_REPLAY_NONCE_HEADER, strlen(ACME_REPLAY_NONCE_HEADER)) == 0) {
+            // Replay nonce found, extract it
+            replay_nonce->len = header->value_len - strlen(ACME_REPLAY_NONCE_HEADER);
+            replay_nonce->data = ngx_alloc(replay_nonce->len, cf->log);
+            ngx_memcpy(replay_nonce->data, header->value + strlen(ACME_REPLAY_NONCE_HEADER), replay_nonce->len);
+            break;
+        }
+    }
+
+    if(header == NULL) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "No Replay-Nonce found in HTTP response headers");
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+} /* ngx_http_acme_create_jwk */
+
+static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, ngx_str_t replay_nonce, json_t **flattened_jws)
 {
     /*
      * Structure according to RFC7515:
@@ -392,7 +452,7 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
 
     // Pack header into JSON
     // TODO (KK) add alg header
-    header = json_pack("{s:s, s:s%, s:o}", "alg", "", "nonce", nonce.data, nonce.len, "jwk", jwk);
+    header = json_pack("{s:s, s:s%, s:o}", "alg", "", "nonce", replay_nonce.data, replay_nonce.len, "jwk", jwk);
     if(header == NULL) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error packing JWS header");
         ngx_free(serialized_payload.data);
@@ -520,13 +580,8 @@ static char *ngx_http_acme_read_jwk(ngx_conf_t *cf, void *conf, ngx_str_t jwk_st
     return NGX_CONF_OK;
 } /* ngx_http_acme_create_jwk */
 
-//static char *ngx_http_acme_base64url_encode(ngx_conf_t *cf, void *conf, ngx_str_t input, ngx_str_t *output)
-//{
-//
-//    return NGX_CONF_OK;
-//} /* ngx_http_acme_base64url_encode */
-
-static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, json_t *request_json, json_t **response_json)
+static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method,
+        json_t *request_json, json_t **response_json, ngx_http_acme_slist_t **response_headers)
 {
     ngx_str_t response_data;
     ngx_str_t request_data;
@@ -548,7 +603,7 @@ static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, n
     }
 
     /* Make request */
-    if(ngx_http_acme_plain_request(cf, conf, url, http_method, request_data, &response_data) != NGX_CONF_OK) {
+    if(ngx_http_acme_plain_request(cf, conf, url, http_method, request_data, &response_data, response_headers) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while making request\n");
         return NGX_CONF_ERROR;
     }
@@ -572,26 +627,17 @@ static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, n
         return NGX_CONF_ERROR;
     }
 
-    /* The part below is different for each ACME request */
-
-//    if(!json_is_object(*response_json)) {
-//        ngx_log_error(NGX_LOG_ERR, cf->log, 0,
-//                "Error parsing JSON: received data is not a JSON object\n");
-//        json_decref(*response_json);
-//        return NGX_CONF_ERROR;
-//    }
-
     /* End Jansson part */
 
     return NGX_CONF_OK;
 } /* ngx_http_acme_json_request */
 
-// TODO (KK) Add output parameter to pass back the header values of the response
-static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method, ngx_str_t request_data, ngx_str_t *response_data)
+static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method,
+        ngx_str_t request_data, ngx_str_t *response_data, ngx_http_acme_slist_t **response_headers)
 {
     CURL *curl;
     CURLcode res;
-    struct curl_slist *header_list = NULL;
+    struct curl_slist *request_headers = NULL;
 
     FILE *response_data_stream;
 
@@ -623,8 +669,8 @@ static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, 
     if(request_data.data != NULL) {
 
         // TODO (KK) Add method parameter for the header list to be dynamic in e.g. the content type, since it doesn't always have to be JSON ;)
-        header_list = curl_slist_append(header_list, "Content-Type: application/json");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+        request_headers = curl_slist_append(request_headers, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, request_headers);
 
         /* size of the data to copy from the buffer and send in the request */
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, request_data.len);
@@ -639,10 +685,11 @@ static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, 
      * Setting the response data handling
      */
 
-    /* Setup the stream for the reponse data */
+    /* Setup the stream for the response data */
     response_data_stream = open_memstream((char **) &response_data->data, &response_data->len);
 
     if(response_data_stream == NULL) {
+        curl_slist_free_all(request_headers);
         curl_easy_cleanup(curl);
         return NGX_CONF_ERROR;
     }
@@ -654,19 +701,38 @@ static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, 
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, response_data_stream);
 
     /*
+     * Setting the response header handling
+     */
+
+    if (response_headers != NULL) {
+        curl_easy_setopt(curl, CURLOPT_HEADERDATA, response_headers);
+        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
+                ngx_http_acme_header_callback);
+    }
+
+    /*
      * Perform the request
      */
 
     res = curl_easy_perform(curl);
 
     /* Check for errors */
-    if(res != CURLE_OK)
-        fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+    if(res != CURLE_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+                "Error while performing request: %s\n", curl_easy_strerror(res));
+        fclose(response_data_stream);
+        curl_slist_free_all(request_headers);
+        curl_easy_cleanup(curl);
+        return NGX_CONF_ERROR;
+    }
 
     /* always cleanup */
     curl_easy_cleanup(curl);
 
     fclose(response_data_stream);
+
+    /* free the custom headers */
+    curl_slist_free_all(request_headers);
 
     /* End cURL part */
 
@@ -674,6 +740,25 @@ static char *ngx_http_acme_plain_request(ngx_conf_t *cf, void *conf, char *url, 
 
     return NGX_CONF_OK;
 } /* ngx_http_acme_plain_request */
+
+static size_t ngx_http_acme_header_callback(char *buffer, size_t size, size_t nitems, void *userdata)
+{
+    ngx_http_acme_slist_t **slist = (ngx_http_acme_slist_t **) userdata;
+    ngx_str_t entry;
+
+    if(size * nitems <= 0)
+        return 0;
+
+    // Subtract 2 from the length to trim off the \r\n
+    entry.len = (size * nitems) - 2;
+    entry.data = (u_char *) buffer;
+
+    *slist = ngx_http_acme_slist_append_entry(*slist, entry);
+    if(*slist == NULL)
+        return 0;
+
+    return nitems * size;
+} /* ngx_http_acme_header_callback */
 
 /**
  * TODO (KK) delete
@@ -683,3 +768,96 @@ static ngx_int_t ngx_http_acme_init(ngx_conf_t *cf)
 {
     return NGX_OK;
 } /* ngx_http_acme_init */
+
+/*
+ * Utility functions
+ */
+
+/* Dictionary functions */
+//static ngx_http_acme_sdict_t *ngx_http_acme_sdict_append_kv_pair(ngx_http_acme_sdict_t *sdict, ngx_str_t key, ngx_str_t value)
+//{
+//    ngx_http_acme_sdict_t *new_sdict, *last;
+//
+//    if(sdict != NULL)
+//        for(last = sdict; last->next != NULL; last = last->next);
+//
+//    new_sdict = malloc(sizeof(ngx_http_acme_sdict_t));
+//
+//    if(new_sdict == NULL) {
+//        fprintf(stderr, "Error while allocating new memory for the new dictionary entry");
+//        return NULL;
+//    }
+//
+//    // Fill out new entry
+//    new_sdict->key = (char *) key.data;
+//    new_sdict->key_len = key.len;
+//    new_sdict->value = (char *) value.data;
+//    new_sdict->value_len = value.len;
+//    new_sdict->next = NULL;
+//
+//    // Add new entry to the list
+//    if(sdict == NULL) {
+//        sdict = new_sdict;
+//    } else {
+//        last->next = new_sdict;
+//    }
+//
+//    return sdict;
+//} /* ngx_http_acme_sdict_append_kv_pair */
+//
+//static void ngx_http_acme_sdict_free_all(ngx_http_acme_sdict_t *sdict)
+//{
+//    ngx_http_acme_sdict_t *tmp;
+//
+//    while(sdict != NULL) {
+//        tmp = sdict->next;
+//        free(sdict);
+//        sdict = tmp;
+//    }
+//} /* ngx_http_acme_sdict_free_all */
+
+
+/* List functions */
+static ngx_http_acme_slist_t *ngx_http_acme_slist_append_entry(ngx_http_acme_slist_t *slist, ngx_str_t value)
+{
+    ngx_http_acme_slist_t *new_slist, *last;
+
+    if(slist != NULL)
+        for(last = slist; last->next != NULL; last = last->next);
+
+    new_slist = malloc(sizeof(ngx_http_acme_slist_t));
+
+    if(new_slist == NULL) {
+        fprintf(stderr, "Error while allocating new memory for the new list entry");
+        return NULL;
+    }
+
+    // Copy new entry
+    new_slist->value_len = value.len;
+    new_slist->next = NULL;
+
+    new_slist->value = malloc(new_slist->value_len);
+    ngx_memcpy(new_slist->value, value.data, new_slist->value_len);
+
+    // Add new entry to the list
+    if(slist == NULL) {
+        slist = new_slist;
+    } else {
+        last->next = new_slist;
+    }
+
+    return slist;
+} /* ngx_http_acme_slist_append_entry */
+
+static void ngx_http_acme_slist_free_all(ngx_http_acme_slist_t *slist)
+{
+    ngx_http_acme_slist_t *tmp;
+
+    while(slist != NULL) {
+        tmp = slist->next;
+        free(slist->value);
+        free(slist);
+        slist = tmp;
+    }
+} /* ngx_http_acme_slist_free_all */
+
