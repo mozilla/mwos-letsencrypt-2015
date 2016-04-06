@@ -258,12 +258,16 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
         rsa = RSA_new();
         ret = BN_dec2bn(&e, ACME_ACCOUNT_RSA_EXP);
         if(ret == 0) {
-            // TODO (KK) Report error
+            ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+                    "Error creating the account key. OpenSSL error 0x%xl", ERR_get_error());
+            return NGX_CONF_ERROR;
         }
 
         ret = RSA_generate_key_ex(rsa, ACME_ACCOUNT_RSA_BITS, e, NULL);
         if(ret == 0) {
-            // TODO (KK) Report error
+            ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+                    "Error creating the account key. OpenSSL error 0x%xl", ERR_get_error());
+            return NGX_CONF_ERROR;
         }
 
         // TODO (KK) Save account key in file
@@ -429,7 +433,9 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
 
     json_t *jwk;
     json_t *header;
-    ngx_str_t encoded_protected_header, serialized_payload, encoded_payload, tmp, signing_input;
+    ngx_str_t encoded_protected_header, serialized_payload, encoded_payload, tmp;
+    ngx_str_t signing_input, signature, encoded_signature, digest;
+    unsigned int tmp_int;
     u_char *tmp_char_p;
 
     /*
@@ -454,8 +460,7 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
     }
 
     // Pack header into JSON
-    // TODO (KK) add alg header
-    header = json_pack("{s:s, s:s%, s:o}", "alg", "", "nonce", replay_nonce.data, replay_nonce.len, "jwk", jwk);
+    header = json_pack("{s:s, s:s%, s:o}", "alg", "RS256", "nonce", replay_nonce.data, replay_nonce.len, "jwk", jwk);
     if(header == NULL) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error packing JWS header");
         ngx_free(serialized_payload.data);
@@ -485,13 +490,29 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
 
     println_debug("Signing input: ", &signing_input);
 
-    // TODO (KK) Compute the signature
-
+    // TODO (KK) Create message digest
+    digest = (ngx_str_t) ngx_null_string;
 
     ngx_free(signing_input.data);
 
-    // TODO (KK) base64url encode the signature
+    // TODO (KK) Compute the signature
+    signature.len = RSA_size(key);
+    signature.data = ngx_alloc(signature.len, cf->log);
+    if(RSA_sign(/* TODO (KK) Message digest alg */ 0, digest.data, digest.len, signature.data,
+            &tmp_int, key) != 1) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+                "Error signing the message digest for the JWS signature. OpenSSL error 0x%xl", ERR_get_error());
+        return NGX_CONF_ERROR;
+    }
+    signature.len = tmp_int;
 
+    ngx_free(digest.data);
+
+    // TODO (KK) base64url encode the signature
+    encoded_signature.len = ngx_base64_encoded_length(signature.len);
+    encoded_signature.data = ngx_alloc(encoded_signature.len, cf->log);
+    ngx_encode_base64url(&encoded_signature, &signature);
+    ngx_free(signature.data);
 
     /*
      * Create flattened JWS serialization
@@ -499,12 +520,14 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
     *flattened_jws = json_pack("{s:s%,s:s%,s:s%}",
             "payload", encoded_payload.data, encoded_payload.len,
             "protected", encoded_protected_header.data, encoded_protected_header.len,
-            "signature", "test", 4
+            "signature", encoded_signature.data, encoded_signature.len
             );
 
-    ngx_free(encoded_protected_header.data);
     ngx_free(serialized_payload.data);
+    // TODO (KK) Maybe this is too early for a free since the strings will be used in the flattened JWS (but when to free then?)
     ngx_free(encoded_payload.data);
+    ngx_free(encoded_protected_header.data);
+    ngx_free(encoded_signature.data);
 
     if(*flattened_jws == NULL) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error serializing flattened JWS");
