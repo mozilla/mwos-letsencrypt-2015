@@ -53,6 +53,7 @@ static char *ngx_http_acme_request(ngx_conf_t *cf, void *conf, char *url, ngx_ht
         ngx_http_acme_slist_t **response_headers);
 static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload, RSA *key, ngx_str_t replay_nonce, json_t **flattened_jws);
 static char *ngx_http_acme_create_jwk(ngx_conf_t *cf, void *conf, RSA *key, json_t **jwk);
+//static char *ngx_http_acme_create_priv_jwk(ngx_conf_t *cf, void *conf, RSA *key, json_t **jwk);
 static char *ngx_http_acme_read_jwk(ngx_conf_t *cf, void *conf, ngx_str_t jwk_str, RSA **key);
 static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method,
         json_t *request_json, json_t **response_json, ngx_http_acme_slist_t **response_headers);
@@ -237,7 +238,7 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
      */
 
     int ret;
-    ngx_str_t replay_nonce;
+    ngx_str_t replay_nonce = ngx_null_string;
 
     /*
      * Load key pair for ACME account
@@ -266,6 +267,7 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
         }
 
         // TODO (KK) Save account key in file
+//        ngx_http_acme_create_priv_jwk(ngx_conf_t *cf, void *conf, RSA *key, json_t **jwk)
 
         BN_free(e);
     } else {
@@ -366,7 +368,8 @@ static char *ngx_http_acme_request(ngx_conf_t *cf, void *conf, char *url, ngx_ht
         return NGX_CONF_ERROR;
     }
 
-    ngx_free(replay_nonce->data);
+    if(replay_nonce->data != NULL)
+        ngx_free(replay_nonce->data);
     ngx_str_null(replay_nonce);
     json_decref(signed_request_json);
 
