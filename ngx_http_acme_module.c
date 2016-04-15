@@ -22,9 +22,9 @@
 /*
  * Temporary dev macros
  */
-// Nginx config directory; This should later be gathered from nginx
+/* Nginx config directory; This should later be gathered from nginx */
 #define ACME_DEV_CONF_DIR "conf"
-// This should later be replaced with the value of the server_name directive of the core module
+/* This should later be replaced with the value of the server_name directive of the core module */
 #define ACME_DEV_SERVER_NAME "ledev2.kbauer.at"
 
 #define ACME_DEV_CERT_PATH ACME_DEV_CONF_DIR "/" ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT
@@ -48,6 +48,7 @@
 static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf);
 static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf, ngx_str_t *replay_nonce);
+static char *ngx_http_acme_new_reg(ngx_conf_t *cf, void *conf, ngx_str_t *replay_nonce, RSA *key);
 static char *ngx_http_acme_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method,
         json_t *request_json, RSA *key, ngx_str_t *replay_nonce, json_t **response_json,
         ngx_http_acme_slist_t **response_headers);
@@ -149,7 +150,11 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     /*
      * ACME communication - getting a certificate
      */
-    ngx_http_acme_main(cf, conf);
+
+    if(ngx_http_acme_main(cf, conf) != NGX_CONF_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while gathering certificate from ACME server");
+        return NGX_CONF_ERROR;
+    }
 
     /*
      * TODO (KK) Install certificate (right now it just copies an example cert)
@@ -165,12 +170,12 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         cpyf.time = -1;
         cpyf.log = cf->log;
 
-        // Copy certificate
+        /* Copy certificate */
         ret = ngx_copy_file((u_char *)ACME_DEV_FROM_CERT_PATH, (u_char *)ACME_DEV_CERT_PATH, &cpyf);
 
-        // Copy private key
+        /* Copy private key */
         if(ret == NGX_OK) {
-            // Only 0600 access for private key
+            /* Only 0600 access for private key */
             cpyf.access = NGX_FILE_OWNER_ACCESS;
 
             ret = ngx_copy_file((u_char *)ACME_DEV_FROM_KEY_PATH, (u_char *)ACME_DEV_KEY_PATH, &cpyf);
@@ -185,7 +190,7 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     /*
      * Fool the SSL module into using the ACME certificates
      */
-    // Get SSL module configuration
+    /* Get SSL module configuration */
     sscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_ssl_module);
 
     // TODO (KK) Report warning when ssl configs are not set (acme w/o ssl activated in the same server context is an error)
@@ -194,7 +199,7 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     if(sscf) {
 //        ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Found SSL certificate path: %s", sscf->certificate.data);
 
-        // Spoof SSL cert
+        /* Spoof SSL cert */
         ngx_str_set(&sscf->certificate, ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT);
         ngx_str_set(&sscf->certificate_key, ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT_KEY);
     }
@@ -293,36 +298,43 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
         return NGX_CONF_ERROR;
     }
 
-
-    json_t *test_obj;
-    json_t *test_output;
-
-    /* TODO (KK) Test - remove later: Send request data */
-    test_obj = json_pack("{s:s}", "test", "Test string");
-    if(ngx_http_acme_json_request(cf, conf, "http://www.foaas.com/operations", GET, json_null(), &test_output, NULL) != NGX_CONF_OK) {
-        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "JSON request failed");
+    /* Register an account */
+    if(ngx_http_acme_new_reg(cf, conf, &replay_nonce, rsa) != NGX_CONF_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Failed to register");
         return NGX_CONF_ERROR;
     }
 
-    char *output_str = json_dumps(test_output, 0);
-    println_debug("Returned JSON string: ", &((ngx_str_t)ngx_string_dynamic(output_str)));
 
-    json_decref(test_obj);
-    json_decref(test_output);
 
-    /* TODO (KK) Test - remove later: Sign off JSON */
-    test_obj = json_pack("{s:s}", "test", "Test string");
-    if(ngx_http_acme_sign_json(cf, conf, test_obj, rsa, replay_nonce, &test_output) != NGX_CONF_OK) {
-        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Creating JWS failed");
-        return NGX_CONF_ERROR;
-    }
-
-    output_str = json_dumps(test_output, 0);
-    println_debug("JWS string: ", &((ngx_str_t)ngx_string_dynamic(output_str)));
-
-    json_decref(test_obj);
-    json_decref(test_output);
-    ngx_free(output_str);
+//    json_t *test_obj;
+//    json_t *test_output;
+//
+//    /* TODO (KK) Test - remove later: Send request data */
+//    test_obj = json_pack("{s:s}", "test", "Test string");
+//    if(ngx_http_acme_json_request(cf, conf, "http://www.foaas.com/operations", GET, json_null(), &test_output, NULL) != NGX_CONF_OK) {
+//        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "JSON request failed");
+//        return NGX_CONF_ERROR;
+//    }
+//
+//    char *output_str = json_dumps(test_output, 0);
+//    println_debug("Returned JSON string: ", &((ngx_str_t)ngx_string_dynamic(output_str)));
+//
+//    json_decref(test_obj);
+//    json_decref(test_output);
+//
+//    /* TODO (KK) Test - remove later: Sign off JSON */
+//    test_obj = json_pack("{s:s}", "test", "Test string");
+//    if(ngx_http_acme_sign_json(cf, conf, test_obj, rsa, replay_nonce, &test_output) != NGX_CONF_OK) {
+//        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Creating JWS failed");
+//        return NGX_CONF_ERROR;
+//    }
+//
+//    output_str = json_dumps(test_output, 0);
+//    println_debug("JWS string: ", &((ngx_str_t)ngx_string_dynamic(output_str)));
+//
+//    json_decref(test_obj);
+//    json_decref(test_output);
+//    ngx_free(output_str);
 
 
     RSA_free(rsa);
@@ -334,7 +346,6 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
 static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf, ngx_str_t *replay_nonce)
 {
     json_t *response_json;
-//    json_error_t error;
     ngx_http_acme_slist_t *response_headers = NULL;
 
     /* Make JSON request */
@@ -348,6 +359,34 @@ static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf, ngx_str_t *repl
 
     return NGX_CONF_OK;
 } /* ngx_http_acme_fetch_dir */
+
+
+static char *ngx_http_acme_new_reg(ngx_conf_t *cf, void *conf, ngx_str_t *replay_nonce, RSA *key)
+{
+    json_t *request_json;
+    json_t *response_json;
+    ngx_http_acme_slist_t *response_headers = NULL;
+
+    /* Assemble request */
+    request_json = json_pack("{s:s}", "resource", "new-reg");
+
+    /* Make JSON request */
+    if(ngx_http_acme_request(cf, conf, ACME_SERVER "/acme/new-reg", POST, request_json, key, replay_nonce, &response_json, &response_headers) != NGX_CONF_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while making JSON request");
+        return NGX_CONF_ERROR;
+    }
+
+    /* Process response */
+
+
+
+    json_decref(request_json);
+    json_decref(response_json);
+    ngx_http_acme_slist_free_all(response_headers);
+
+    return NGX_CONF_OK;
+} /* ngx_http_acme_new_reg */
+
 
 static char *ngx_http_acme_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method,
         json_t *request_json, RSA *key, ngx_str_t *replay_nonce, json_t **response_json,
@@ -383,7 +422,7 @@ static char *ngx_http_acme_request(ngx_conf_t *cf, void *conf, char *url, ngx_ht
             continue;
 
         if(ngx_strncmp(header->value, ACME_REPLAY_NONCE_HEADER, strlen(ACME_REPLAY_NONCE_HEADER)) == 0) {
-            // Replay nonce found, extract it
+            /* Replay nonce found, extract it */
             replay_nonce->len = header->value_len - strlen(ACME_REPLAY_NONCE_HEADER);
             replay_nonce->data = ngx_alloc(replay_nonce->len, cf->log);
             ngx_memcpy(replay_nonce->data, header->value + strlen(ACME_REPLAY_NONCE_HEADER), replay_nonce->len);
@@ -434,9 +473,13 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
     json_t *jwk;
     json_t *header;
     ngx_str_t encoded_protected_header, serialized_payload, encoded_payload, tmp;
-    ngx_str_t signing_input, signature, encoded_signature, digest;
-    unsigned int tmp_int;
+    ngx_str_t signing_input, signature, encoded_signature;
     u_char *tmp_char_p;
+
+    /* Variables for signing */
+    EVP_PKEY *evp_key;
+    EVP_MD_CTX *mdctx = NULL;
+    int ret = 0;
 
     /*
      * Encode payload
@@ -451,7 +494,7 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
      * Create header
      */
 
-    // jwk header
+    /* jwk header */
     if(ngx_http_acme_create_jwk(cf, conf, key, &jwk) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Failed to create the JWK from the account key");
         ngx_free(serialized_payload.data);
@@ -459,7 +502,7 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
         return NGX_CONF_ERROR;
     }
 
-    // Pack header into JSON
+    /* Pack header into JSON */
     header = json_pack("{s:s, s:s%, s:o}", "alg", "RS256", "nonce", replay_nonce.data, replay_nonce.len, "jwk", jwk);
     if(header == NULL) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error packing JWS header");
@@ -468,7 +511,7 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
         return NGX_CONF_ERROR;
     }
 
-    // Serialize and base64url encode header
+    /* Serialize and base64url encode header */
     tmp = (ngx_str_t)ngx_string_dynamic(json_dumps(header, 0));
     encoded_protected_header.len = ngx_base64_encoded_length(tmp.len);
     encoded_protected_header.data = ngx_alloc(encoded_protected_header.len, cf->log);
@@ -477,11 +520,11 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
     json_decref(header);
 
     /*
-     * TODO (KK) Create signature
+     * Create signature
      */
 
-    // Create signing input
-    // = ASCII(BASE64URL(UTF8(JWS Protected Header)) || '.' || BASE64URL(JWS Payload))
+    /* Create signing input */
+    /* = ASCII(BASE64URL(UTF8(JWS Protected Header)) || '.' || BASE64URL(JWS Payload)) */
     signing_input.len = encoded_protected_header.len + strlen(".") + encoded_payload.len;
     signing_input.data = ngx_alloc(signing_input.len, cf->log);
     tmp_char_p = ngx_copy(signing_input.data, encoded_protected_header.data, encoded_protected_header.len);
@@ -490,25 +533,62 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
 
     println_debug("Signing input: ", &signing_input);
 
-    // TODO (KK) Create message digest
-    digest = (ngx_str_t) ngx_null_string;
+    /* Convert the RSA key to the EVP_PKEY structure */
+    evp_key = EVP_PKEY_new();
+    if(evp_key == NULL) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+                "Error signing the message digest for the JWS signature.");
+        return NGX_CONF_ERROR;
+    }
 
-    ngx_free(signing_input.data);
+    if(EVP_PKEY_set1_RSA(evp_key, key) == 0) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+                "Error signing the message digest for the JWS signature.");
+        return NGX_CONF_ERROR;
+    }
 
-    // TODO (KK) Compute the signature
-    signature.len = RSA_size(key);
+    /* Create the message digest context */
+    ret = 0;
+    mdctx = EVP_MD_CTX_create();
+    if(mdctx == NULL)
+        goto err;
+
+    /* Initialize the DigestSign operation - SHA-256 has been selected as the message digest function */
+    if(EVP_DigestSignInit(mdctx, NULL, EVP_sha256(), NULL, evp_key) != 1)
+        goto err;
+
+    /* Call update with the message */
+    if(EVP_DigestSignUpdate(mdctx, signing_input.data, signing_input.len) != 1)
+        goto err;
+
+    /* Finalise the DigestSign operation */
+    /* First call EVP_DigestSignFinal with a NULL sig parameter to obtain the length of the */
+    /* signature. The length is returned in siglen. */
+    if(EVP_DigestSignFinal(mdctx, NULL, &signature.len) != 1)
+        goto err;
+
+    /* Allocate memory for the signature */
     signature.data = ngx_alloc(signature.len, cf->log);
-    if(RSA_sign(/* TODO (KK) Message digest alg */ 0, digest.data, digest.len, signature.data,
-            &tmp_int, key) != 1) {
+
+    /* Obtain the signature */
+    if(EVP_DigestSignFinal(mdctx, signature.data, &signature.len) != 1)
+        goto err;
+
+    /* Success */
+    ret = 1;
+
+    err:
+    if(ret != 1) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0,
                 "Error signing the message digest for the JWS signature. OpenSSL error 0x%xl", ERR_get_error());
         return NGX_CONF_ERROR;
     }
-    signature.len = tmp_int;
 
-    ngx_free(digest.data);
+    /* Clean up */
+    EVP_MD_CTX_destroy(mdctx);
+    EVP_PKEY_free(evp_key);
 
-    // TODO (KK) base64url encode the signature
+    /* base64url encode the signature */
     encoded_signature.len = ngx_base64_encoded_length(signature.len);
     encoded_signature.data = ngx_alloc(encoded_signature.len, cf->log);
     ngx_encode_base64url(&encoded_signature, &signature);
@@ -517,6 +597,7 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
     /*
      * Create flattened JWS serialization
      */
+
     *flattened_jws = json_pack("{s:s%,s:s%,s:s%}",
             "payload", encoded_payload.data, encoded_payload.len,
             "protected", encoded_protected_header.data, encoded_protected_header.len,
@@ -543,7 +624,7 @@ static char *ngx_http_acme_create_jwk(ngx_conf_t *cf, void *conf, RSA *key, json
 {
     ngx_str_t e, n, tmp;
 
-    // Baser64url encode e
+    /* Baser64url encode e */
     tmp.len = BN_num_bytes(key->e);
     tmp.data = ngx_alloc(tmp.len, cf->log);
     tmp.len = BN_bn2bin(key->e, tmp.data);
@@ -552,7 +633,7 @@ static char *ngx_http_acme_create_jwk(ngx_conf_t *cf, void *conf, RSA *key, json
     ngx_encode_base64url(&e, &tmp);
     ngx_free(tmp.data);
 
-    // Baser64url encode n
+    /* Baser64url encode n */
     tmp.len = BN_num_bytes(key->n);
     tmp.data = ngx_alloc(tmp.len, cf->log);
     tmp.len = BN_bn2bin(key->n, tmp.data);
@@ -775,7 +856,7 @@ static size_t ngx_http_acme_header_callback(char *buffer, size_t size, size_t ni
     if(size * nitems <= 0)
         return 0;
 
-    // Subtract 2 from the length to trim off the \r\n
+    /* Subtract 2 from the length to trim off the \r\n */
     entry.len = (size * nitems) - 2;
     entry.data = (u_char *) buffer;
 
@@ -858,14 +939,14 @@ static ngx_http_acme_slist_t *ngx_http_acme_slist_append_entry(ngx_http_acme_sli
         return NULL;
     }
 
-    // Copy new entry
+    /* Copy new entry */
     new_slist->value_len = value.len;
     new_slist->next = NULL;
 
     new_slist->value = malloc(new_slist->value_len);
     ngx_memcpy(new_slist->value, value.data, new_slist->value_len);
 
-    // Add new entry to the list
+    /* Add new entry to the list */
     if(slist == NULL) {
         slist = new_slist;
     } else {
