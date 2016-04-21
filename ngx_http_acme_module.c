@@ -49,6 +49,7 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf);
 static char *ngx_http_acme_fetch_dir(ngx_conf_t *cf, void *conf, ngx_str_t *replay_nonce);
 static char *ngx_http_acme_new_reg(ngx_conf_t *cf, void *conf, ngx_str_t *replay_nonce, RSA *key);
+static char *ngx_http_acme_new_auth(ngx_conf_t *cf, void *conf, ngx_str_t *replay_nonce, RSA *key);
 static char *ngx_http_acme_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method,
         json_t *request_json, RSA *key, ngx_str_t *replay_nonce, json_t **response_json,
         ngx_http_acme_slist_t **response_headers);
@@ -304,6 +305,12 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    /* Authorize for domain */
+    if(ngx_http_acme_new_auth(cf, conf, &replay_nonce, rsa) != NGX_CONF_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Failed to authorize");
+        return NGX_CONF_ERROR;
+    }
+
 
 
 //    json_t *test_obj;
@@ -386,6 +393,34 @@ static char *ngx_http_acme_new_reg(ngx_conf_t *cf, void *conf, ngx_str_t *replay
 
     return NGX_CONF_OK;
 } /* ngx_http_acme_new_reg */
+
+
+static char *ngx_http_acme_new_auth(ngx_conf_t *cf, void *conf, ngx_str_t *replay_nonce, RSA *key)
+{
+    json_t *request_json;
+    json_t *response_json;
+    ngx_http_acme_slist_t *response_headers = NULL;
+
+    /* Assemble request */
+    request_json = json_pack("{s:s, s:{s:s, s:s} }", "resource", "new-authz",
+            "identifier", "type", "dns", "value", ACME_DEV_SERVER_NAME);
+
+    /* Make JSON request */
+    if(ngx_http_acme_request(cf, conf, ACME_SERVER "/acme/new-authz", POST, request_json, key, replay_nonce, &response_json, &response_headers) != NGX_CONF_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while making JSON request");
+        return NGX_CONF_ERROR;
+    }
+
+    /* Process response */
+
+
+
+    json_decref(request_json);
+    json_decref(response_json);
+    ngx_http_acme_slist_free_all(response_headers);
+
+    return NGX_CONF_OK;
+} /* ngx_http_acme_new_auth */
 
 
 static char *ngx_http_acme_request(ngx_conf_t *cf, void *conf, char *url, ngx_http_acme_http_method_t http_method,
