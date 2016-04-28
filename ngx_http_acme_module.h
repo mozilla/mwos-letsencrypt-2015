@@ -8,8 +8,6 @@
 #ifndef NGX_HTTP_ACME_MODULE_H_
 #define NGX_HTTP_ACME_MODULE_H_
 
-#define ACME_REPLAY_NONCE_HEADER "Replay-Nonce: "
-
 /*
  * Makros which could also form config directives later
  */

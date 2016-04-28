@@ -20,6 +20,13 @@
 #include "ngx_http_acme_module.h"
 
 /*
+ * String constants
+ */
+#define ACME_REPLAY_NONCE_PREFIX_STRING ACME_REPLAY_NONCE_HEADER ": "
+#define ACME_TOS_PREFIX_STRING "Link: <"
+#define ACME_TOS_SUFFIX_STRING ">;rel=\"" ACME_TERMS_LINK_HEADER "\""
+
+/*
  * Temporary dev macros
  */
 /* Nginx config directory; This should later be gathered from nginx */
@@ -261,6 +268,7 @@ static char *ngx_http_acme_main(ngx_conf_t *cf, void *conf)
 
         ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Generate RSA key");
 
+        // TODO (KK) Change key type to EVP_PKEY everywhere for being able to handle other keys than RSA
         rsa = RSA_new();
         ret = BN_dec2bn(&e, ACME_ACCOUNT_RSA_EXP);
         if(ret == 0) {
@@ -373,6 +381,10 @@ static char *ngx_http_acme_new_reg(ngx_conf_t *cf, void *conf, ngx_str_t *replay
     json_t *request_json;
     json_t *response_json;
     ngx_http_acme_slist_t *response_headers = NULL;
+    ngx_http_acme_slist_t *header = NULL;
+    ngx_str_t tos_url = ngx_null_string;
+    char *tmp, *max_addr, *min_addr;
+    uint8_t found;
 
     /* Assemble request */
     request_json = json_pack("{s:s}", "resource", "new-reg");
@@ -385,8 +397,60 @@ static char *ngx_http_acme_new_reg(ngx_conf_t *cf, void *conf, ngx_str_t *replay
 
     /* Process response */
 
+    /*
+     * Terms of service agreement
+     */
 
+    /* Search for and extract terms-of-service url from response headers */
+    for(header = response_headers; header != NULL; header = header->next) {
+        /* Check minimum length */
+        if(header->value_len < strlen(ACME_TOS_PREFIX_STRING ACME_TOS_SUFFIX_STRING))
+            continue;
 
+        /* Check prefix */
+        if(ngx_strncmp(header->value, ACME_TOS_PREFIX_STRING, strlen(ACME_TOS_PREFIX_STRING)) != 0)
+            continue;
+
+        /* Search backwards */
+        min_addr = header->value + strlen(ACME_TOS_PREFIX_STRING);
+        max_addr = header->value + header->value_len - strlen(ACME_TOS_SUFFIX_STRING);
+        found = 0;
+        for(tmp = max_addr; tmp >= min_addr; tmp--) {
+           if(ngx_strncmp(tmp, ACME_TOS_SUFFIX_STRING, strlen(ACME_TOS_SUFFIX_STRING)) == 0) {
+               found = 1;
+               break;
+           }
+        }
+
+        if (!found)
+            continue;
+
+        tos_url.data = (u_char *) min_addr;
+        tos_url.len = tmp - min_addr;
+    }
+
+    if(header == NULL) {
+        /* No terms-of-service link found, so we don't need to agree to anything */
+        goto new_reg_end;
+    }
+
+    /* Send a registration update to agree to the TOS */
+
+    /* Free local variables before reusing them */
+    json_decref(request_json);
+    json_decref(response_json);
+    ngx_http_acme_slist_free_all(response_headers);
+
+    /* Assemble request */
+    request_json = json_pack("{s:s,s:s%}", "resource", "new-reg", "agreement", tos_url.data, tos_url.len);
+
+    /* Make JSON request */
+    if(ngx_http_acme_request(cf, conf, ACME_SERVER "/acme/new-reg", POST, request_json, key, replay_nonce, &response_json, &response_headers) != NGX_CONF_OK) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while making JSON request");
+        return NGX_CONF_ERROR;
+    }
+
+    new_reg_end:
     json_decref(request_json);
     json_decref(response_json);
     ngx_http_acme_slist_free_all(response_headers);
@@ -412,7 +476,6 @@ static char *ngx_http_acme_new_auth(ngx_conf_t *cf, void *conf, ngx_str_t *repla
     }
 
     /* Process response */
-
 
 
     json_decref(request_json);
@@ -453,14 +516,14 @@ static char *ngx_http_acme_request(ngx_conf_t *cf, void *conf, char *url, ngx_ht
 
     /* Search for and extract replay nonce from response headers */
     for(header = *response_headers; header != NULL; header = header->next) {
-        if(header->value_len < strlen(ACME_REPLAY_NONCE_HEADER))
+        if(header->value_len < strlen(ACME_REPLAY_NONCE_PREFIX_STRING))
             continue;
 
-        if(ngx_strncmp(header->value, ACME_REPLAY_NONCE_HEADER, strlen(ACME_REPLAY_NONCE_HEADER)) == 0) {
+        if(ngx_strncmp(header->value, ACME_REPLAY_NONCE_PREFIX_STRING, strlen(ACME_REPLAY_NONCE_PREFIX_STRING)) == 0) {
             /* Replay nonce found, extract it */
-            replay_nonce->len = header->value_len - strlen(ACME_REPLAY_NONCE_HEADER);
+            replay_nonce->len = header->value_len - strlen(ACME_REPLAY_NONCE_PREFIX_STRING);
             replay_nonce->data = ngx_alloc(replay_nonce->len, cf->log);
-            ngx_memcpy(replay_nonce->data, header->value + strlen(ACME_REPLAY_NONCE_HEADER), replay_nonce->len);
+            ngx_memcpy(replay_nonce->data, header->value + strlen(ACME_REPLAY_NONCE_PREFIX_STRING), replay_nonce->len);
             break;
         }
     }

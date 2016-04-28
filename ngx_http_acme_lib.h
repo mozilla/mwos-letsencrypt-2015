@@ -8,16 +8,7 @@
 #ifndef NGX_HTTP_ACME_LIB_H_
 #define NGX_HTTP_ACME_LIB_H_
 
-//typedef struct {
-//    char *new_reg;
-//    char *recover_reg;
-//    char *new_authz;
-//    char *new_cert;
-//    char *revoke_cert;
-//    char *reg;
-//    char *authz;
-//    char *challenge;
-//    char *cert;
-//} acme_dir_t;
+#define ACME_REPLAY_NONCE_HEADER "Replay-Nonce"
+#define ACME_TERMS_LINK_HEADER "terms-of-service"
 
 #endif /* NGX_HTTP_ACME_LIB_H_ */
