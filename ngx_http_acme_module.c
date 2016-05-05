@@ -25,6 +25,7 @@
 #define ACME_REPLAY_NONCE_PREFIX_STRING ACME_REPLAY_NONCE_HEADER ": "
 #define ACME_TOS_PREFIX_STRING "Link: <"
 #define ACME_TOS_SUFFIX_STRING ">;rel=\"" ACME_TERMS_LINK_HEADER "\""
+#define ACME_LOCATION_HEADER_PREFIX_STRING "Location: "
 
 /*
  * Temporary dev macros
@@ -381,10 +382,12 @@ static char *ngx_http_acme_new_reg(ngx_conf_t *cf, void *conf, ngx_str_t *replay
     json_t *request_json;
     json_t *response_json;
     ngx_http_acme_slist_t *response_headers = NULL;
+    ngx_http_acme_slist_t *response_headers2 = NULL;
     ngx_http_acme_slist_t *header = NULL;
     ngx_str_t tos_url = ngx_null_string;
+    char *reg_location = NULL;
+    size_t reg_location_len = 0;
     char *tmp, *max_addr, *min_addr;
-    uint8_t found;
 
     /* Assemble request */
     request_json = json_pack("{s:s}", "resource", "new-reg");
@@ -396,6 +399,26 @@ static char *ngx_http_acme_new_reg(ngx_conf_t *cf, void *conf, ngx_str_t *replay
     }
 
     /* Process response */
+
+    /* Search for and extract the location of the registration object */
+    for(header = response_headers; header != NULL; header = header->next) {
+        if(header->value_len < strlen(ACME_LOCATION_HEADER_PREFIX_STRING))
+            continue;
+
+        if(ngx_strncmp(header->value, ACME_LOCATION_HEADER_PREFIX_STRING, strlen(ACME_LOCATION_HEADER_PREFIX_STRING)) == 0) {
+            /* Location header found, extract it */
+            reg_location_len = header->value_len - strlen(ACME_LOCATION_HEADER_PREFIX_STRING) + 1 /* for terminating null character */;
+            reg_location = ngx_alloc(reg_location_len, cf->log);
+            ngx_memcpy(reg_location, header->value + strlen(ACME_LOCATION_HEADER_PREFIX_STRING), reg_location_len - 1);
+            reg_location[reg_location_len - 1] = '\0';
+            break;
+        }
+    }
+
+    if(header == NULL) {
+        ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Location of registration object not found in HTTP response headers");
+        return NGX_CONF_ERROR;
+    }
 
     /*
      * Terms of service agreement
@@ -414,43 +437,38 @@ static char *ngx_http_acme_new_reg(ngx_conf_t *cf, void *conf, ngx_str_t *replay
         /* Search backwards */
         min_addr = header->value + strlen(ACME_TOS_PREFIX_STRING);
         max_addr = header->value + header->value_len - strlen(ACME_TOS_SUFFIX_STRING);
-        found = 0;
         for(tmp = max_addr; tmp >= min_addr; tmp--) {
            if(ngx_strncmp(tmp, ACME_TOS_SUFFIX_STRING, strlen(ACME_TOS_SUFFIX_STRING)) == 0) {
-               found = 1;
-               break;
+               goto found;
            }
         }
-
-        if (!found)
-            continue;
-
-        tos_url.data = (u_char *) min_addr;
-        tos_url.len = tmp - min_addr;
     }
 
-    if(header == NULL) {
-        /* No terms-of-service link found, so we don't need to agree to anything */
-        goto new_reg_end;
-    }
+    /* No terms-of-service link found, so we don't need to agree to anything */
+    goto new_reg_end;
+
+    found:
+    tos_url.data = (u_char *) min_addr;
+    tos_url.len = tmp - min_addr;
 
     /* Send a registration update to agree to the TOS */
 
     /* Free local variables before reusing them */
     json_decref(request_json);
     json_decref(response_json);
-    ngx_http_acme_slist_free_all(response_headers);
 
     /* Assemble request */
-    request_json = json_pack("{s:s,s:s%}", "resource", "new-reg", "agreement", tos_url.data, tos_url.len);
+    request_json = json_pack("{s:s,s:s%}", "resource", "reg", "agreement", tos_url.data, tos_url.len);
 
     /* Make JSON request */
-    if(ngx_http_acme_request(cf, conf, ACME_SERVER "/acme/new-reg", POST, request_json, key, replay_nonce, &response_json, &response_headers) != NGX_CONF_OK) {
+    if(ngx_http_acme_request(cf, conf, reg_location, POST, request_json, key, replay_nonce, &response_json, &response_headers2) != NGX_CONF_OK) {
         ngx_log_error(NGX_LOG_ERR, cf->log, 0, "Error while making JSON request");
         return NGX_CONF_ERROR;
     }
+    ngx_http_acme_slist_free_all(response_headers2);
 
     new_reg_end:
+    ngx_free(reg_location);
     json_decref(request_json);
     json_decref(response_json);
     ngx_http_acme_slist_free_all(response_headers);
@@ -476,6 +494,7 @@ static char *ngx_http_acme_new_auth(ngx_conf_t *cf, void *conf, ngx_str_t *repla
     }
 
     /* Process response */
+
 
 
     json_decref(request_json);
@@ -588,6 +607,8 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
     encoded_payload.data = ngx_alloc(encoded_payload.len, cf->log);
     ngx_encode_base64url(&encoded_payload, &serialized_payload);
 
+    println_debug("Signing payload: ", &serialized_payload);
+
     /*
      * Create header
      */
@@ -628,8 +649,6 @@ static char *ngx_http_acme_sign_json(ngx_conf_t *cf, void *conf, json_t *payload
     tmp_char_p = ngx_copy(signing_input.data, encoded_protected_header.data, encoded_protected_header.len);
     tmp_char_p = ngx_copy(tmp_char_p, ".", strlen("."));
     tmp_char_p = ngx_copy(tmp_char_p, encoded_payload.data, encoded_payload.len);
-
-    println_debug("Signing input: ", &signing_input);
 
     /* Convert the RSA key to the EVP_PKEY structure */
     evp_key = EVP_PKEY_new();
@@ -821,7 +840,11 @@ static char *ngx_http_acme_json_request(ngx_conf_t *cf, void *conf, char *url, n
 
     /* Begin Jansson part */
 
-    *response_json = json_loadb((char *) response_data.data, response_data.len, 0, &error);
+    if(response_data.len <= 0) {
+        *response_json = json_null();
+    } else {
+        *response_json = json_loadb((char *) response_data.data, response_data.len, 0, &error);
+    }
     free(response_data.data);
     ngx_str_null(&response_data);
 
