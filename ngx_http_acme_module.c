@@ -209,8 +209,18 @@ static char *ngx_http_acme(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 //        ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, "Found SSL certificate path: %s", sscf->certificate.data);
 
         /* Spoof SSL cert */
-        ngx_str_set(&sscf->certificate, ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT);
-        ngx_str_set(&sscf->certificate_key, ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT_KEY);
+        sscf->certificates = ngx_array_create(cf->pool, 4, sizeof(ngx_str_t));
+        if (sscf->certificates == NULL) {
+            return NGX_CONF_ERROR;
+        }
+        ((ngx_str_t *) sscf->certificates->elts)[0] = (ngx_str_t) ngx_string(ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT);
+
+        /* Spoof SSL cert key */
+        sscf->certificate_keys = ngx_array_create(cf->pool, 4, sizeof(ngx_str_t));
+        if (sscf->certificate_keys == NULL) {
+            return NGX_CONF_ERROR;
+        }
+        ((ngx_str_t *) sscf->certificate_keys->elts)[0] = (ngx_str_t) ngx_string(ACME_DIR "/" ACME_LIVE_DIR "/" ACME_DEV_SERVER_NAME "/" ACME_CERT);
     }
 
 
